@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+*, *::before, *::after { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+
+body {
+  background: radial-gradient(ellipse 90% 70% at 50% -5%, #0a103a 0%, #030610 65%);
+  min-height:100vh;
+  font-family:'DM Sans',system-ui,sans-serif;
+}
+
+/* Scanlines */
+body::before {
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:9999;
+  background: repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,217,247,.012) 2px,rgba(0,217,247,.012) 4px);
+}
+
+::-webkit-scrollbar { width:4px; height:4px; }
+::-webkit-scrollbar-track { background:#07091a; }
+::-webkit-scrollbar-thumb { background:#15203a; border-radius:4px; }
+::-webkit-scrollbar-thumb:hover { background:#00d9f733; }
+
+.panel {
+  background: linear-gradient(135deg,rgba(11,15,34,.97) 0%,rgba(7,9,26,.98) 100%);
+  border:1px solid rgba(21,32,58,.9);
+  border-radius:14px;
+  position:relative; overflow:hidden;
+  box-shadow: 0 4px 40px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.04);
+}
+.panel::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,transparent 0%,rgba(0,217,247,.45) 50%,transparent 100%);
+}
+
+.badge { font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; padding:2px 8px; border-radius:4px; }
+.badge-emergency { background:rgba(255,31,76,.25); color:#ff4569; border:1px solid rgba(255,31,76,.4); animation:pulse 1s infinite; }
+.badge-critical  { background:rgba(255,31,76,.15); color:#ff4569; border:1px solid rgba(255,31,76,.3); }
+.badge-high      { background:rgba(255,123,0,.15); color:#ff9c33; border:1px solid rgba(255,123,0,.3); }
+.badge-medium    { background:rgba(251,191,36,.12); color:#fbbf24; border:1px solid rgba(251,191,36,.25); }
+.badge-low       { background:rgba(0,232,122,.10); color:#00e87a; border:1px solid rgba(0,232,122,.2); }
+.badge-info      { background:rgba(0,217,247,.10); color:#00d9f7; border:1px solid rgba(0,217,247,.2); }
+
+.badge-safe         { background:rgba(0,232,122,.10);  color:#00e87a; border:1px solid rgba(0,232,122,.2); }
+.badge-elevated     { background:rgba(251,191,36,.12); color:#fbbf24; border:1px solid rgba(251,191,36,.25); }
+.badge-warning      { background:rgba(255,123,0,.15);  color:#ff9c33; border:1px solid rgba(255,123,0,.3); }
+.badge-under_attack { background:rgba(255,31,76,.25);  color:#ff4569; border:1px solid rgba(255,31,76,.4); animation:pulse 1s infinite; }
+
+.mono { font-family:'Share Tech Mono',monospace; }
+.font-display { font-family:'Syne',sans-serif; }
+.text-gradient { background:linear-gradient(135deg,#00d9f7,#8b5cf6); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+
+/* Leaflet dark overrides */
+.leaflet-container { background:#07091a !important; }
+.leaflet-tile-pane { filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(1.1); }

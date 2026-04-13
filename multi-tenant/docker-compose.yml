@@ -1,0 +1,36 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: shadow-mt-postgres
+    environment:
+      POSTGRES_USER: shadow_admin
+      POSTGRES_PASSWORD: S3cr3t_MT_2025!
+      POSTGRES_DB: shadow_ndr_mt
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_mt_data:/var/lib/postgresql/data
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/01_init.sql
+      - ./backend/db/rls.sql:/docker-entrypoint-initdb.d/02_rls.sql
+      - ./backend/db/seed.sql:/docker-entrypoint-initdb.d/03_seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shadow_admin -d shadow_ndr_mt"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: shadow-mt-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_mt_data:

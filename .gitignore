@@ -1,0 +1,35 @@
+# קבצי לוג - אסור לדחוף אותם!
+*.log
+*.log.*
+backend.log
+*.log
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node.js
+node_modules/
+package-lock.json
+
+# Rust build
+target/
+*.exe
+*.dll
+*.pdb
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.txt
+*.out

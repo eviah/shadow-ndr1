@@ -1,0 +1,63 @@
+kafka:
+  brokers:
+    - "localhost:9092"
+  topic: "shadow.raw"
+  dlq_topic: "shadow.dlq"
+  group_id: "shadow-ingestion"
+  max_retries: 3
+  retry_base_delay: "200ms"
+
+clickhouse:
+  host: "localhost"
+  port: 9000
+  database: "shadow_ndr"
+  user: "default"
+  password: ""
+
+postgres:
+  host: "localhost"
+  port: 5432
+  database: "shadow_ndr"
+  user: "shadow"
+  password: "shadow123"
+
+redis:
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 0
+
+ml:
+  url: "http://localhost:8001"
+  timeout: "2s"
+  cache_ttl: "30s"
+  explain_threshold: 0.75
+  update_enabled: true
+
+circuit_breaker:
+  max_requests: 3
+  interval: "10s"
+  timeout: "30s"
+  failure_ratio: 0.5
+
+processor:
+  batch_size: 100
+  max_batch_size: 2000
+  flush_interval: "5s"
+  redis_ttl: "5m"
+  worker_count: 4
+  shutdown_timeout: "30s"
+  rate_limit_interval: "1m"
+
+alerting:
+  critical_threshold: 0.85
+  soar_webhook: ""
+
+tracing:
+  enabled: false
+  endpoint: ""
+  service_name: "shadow-ingestion"
+
+metrics_port: 9090
+log_level: "info"
+environment: "development"

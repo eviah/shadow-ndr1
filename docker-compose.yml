@@ -1,0 +1,179 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: shadow-postgres
+    environment:
+      POSTGRES_DB: shadow_ndr
+      POSTGRES_USER: shadow
+      POSTGRES_PASSWORD: shadow123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - shadow-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shadow -d shadow_ndr"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest-alpine
+    container_name: shadow-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    networks:
+      - shadow-network
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  redis:
+    image: redis:7-alpine
+    container_name: shadow-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - shadow-network
+
+  kafka:
+    image: apache/kafka:latest
+    container_name: shadow-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_BYTES: "1073741824"
+      KAFKA_LOG_RETENTION_MS: "86400000"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_HEAP_OPTS: "-Xmx256M -Xms128M"
+    ports:
+      - "9092:9092"
+    networks:
+      - shadow-network
+    restart: unless-stopped
+
+  shadow-api:
+    build: ./shadow-api
+    container_name: shadow-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://shadow:shadow123@postgres:5432/shadow_ndr
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+      - CLICKHOUSE_HOST=clickhouse
+      - ML_API_URL=http://shadow-ml:8001
+      - SECRET_KEY=your-super-secret-key-change-in-production
+    volumes:
+      - ./shadow-api:/app
+      - api_models:/app/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started
+      kafka:
+        condition: service_started
+      redis:
+        condition: service_started
+    networks:
+      - shadow-network
+    restart: unless-stopped
+
+  shadow-ml:
+    build: ./shadow-ml
+    container_name: shadow-ml
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://shadow:shadow123@postgres:5432/shadow_ndr
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./shadow-ml:/app
+      - ml_models:/app/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - shadow-network
+    restart: unless-stopped
+
+  shadow-ui:
+    build: ./shadow-ui
+    container_name: shadow-ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - shadow-api
+    networks:
+      - shadow-network
+    restart: unless-stopped
+
+  shadow-ingestion:
+    build: ./shadow-ingestion
+    container_name: shadow-ingestion
+    environment:
+      - SHADOW_KAFKA_BROKERS=kafka:9092
+      - SHADOW_KAFKA_TOPIC=shadow.raw
+      - SHADOW_KAFKA_DLQ_TOPIC=shadow.dlq
+      - SHADOW_KAFKA_GROUP_ID=shadow-ingestion
+      - SHADOW_CLICKHOUSE_HOST=clickhouse
+      - SHADOW_CLICKHOUSE_PORT=9000
+      - SHADOW_CLICKHOUSE_DATABASE=shadow_ndr
+      - SHADOW_POSTGRES_HOST=postgres
+      - SHADOW_POSTGRES_PORT=5432
+      - SHADOW_POSTGRES_DATABASE=shadow_ndr
+      - SHADOW_POSTGRES_USER=shadow
+      - SHADOW_POSTGRES_PASSWORD=shadow123
+      - SHADOW_REDIS_HOST=redis
+      - SHADOW_REDIS_PORT=6379
+      - SHADOW_ML_URL=http://shadow-ml:8001
+      - SHADOW_PROCESSOR_WORKER_COUNT=4
+      - SHADOW_PROCESSOR_BATCH_SIZE=200
+      - SHADOW_PROCESSOR_FLUSH_INTERVAL=5s
+      - SHADOW_ALERTING_CRITICAL_THRESHOLD=0.85
+      - SHADOW_METRICS_PORT=9090
+      - SHADOW_LOG_LEVEL=info
+      - SHADOW_ENVIRONMENT=production
+      - TZ=UTC
+    volumes:
+      - ./shadow-ingestion/config.yaml:/app/config.yaml:ro
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    depends_on:
+      - kafka
+      - clickhouse
+      - postgres
+      - redis
+      - shadow-ml
+    networks:
+      - shadow-network
+    restart: unless-stopped
+
+networks:
+  shadow-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  clickhouse_data:
+  api_models:
+  ml_models:

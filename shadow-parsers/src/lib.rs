@@ -1,0 +1,282 @@
+//! Shadow NDR – Aviation Protocol Parsers Suite
+//!
+//! This crate provides high‑performance, memory‑safe parsers for aviation
+//! communication protocols used in the Shadow NDR platform. It includes
+//! complete implementations of:
+//!
+//! - **ADS‑B** (Mode S Extended Squitter)
+//! - **ACARS** (Aircraft Communications Addressing and Reporting System)
+//! - **Mode S** (short and long squitters)
+//! - **VDL Mode 2** (VHF Data Link)
+//! - **CPDLC** (Controller–Pilot Data Link Communications)
+//! - **AeroMACS** (Aeronautical Mobile Airport Communications System)
+//! - **IEC 60870‑5‑104** (telecontrol, extended for airport ground systems)
+//!
+//! # Features
+//! - Zero‑copy parsing with `nom`
+//! - Streaming parsers with buffer pooling
+//! - Built‑in threat detection (spoofing, hijack, jamming, kinematic anomalies)
+//! - Aviation criticality levels (Normal, Warning, Emergency, SystemFailure)
+//! - Serialization to JSON / bincode
+//! - Comprehensive tests and benchmarks
+//! - Feature flags for selective compilation
+//!
+//! # Example
+//! ```
+//! use shadow_parsers::prelude::*;
+//!
+//! // Parse an ADS‑B frame
+//! let raw = &[0x8D, 0x76, 0x1B, 0x2A, 0x58, 0x99, 0x20, 0x2E, 0x23, 0x60, 0x52, 0x00, 0x00, 0x00];
+//! let frame = parse_adsb(raw).unwrap();
+//! println!("{}", frame);
+//! ```
+
+#![warn(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
+
+// =============================================================================
+// Protocol modules (feature‑gated)
+// =============================================================================
+
+#[cfg(feature = "adsb")]
+pub mod adsb;
+#[cfg(feature = "acars")]
+pub mod acars;
+#[cfg(feature = "mode_s")]
+pub mod mode_s;
+#[cfg(feature = "vdl")]
+pub mod vdl;
+#[cfg(feature = "cpdlc")]
+pub mod cpdlc;
+#[cfg(feature = "aeromacs")]
+pub mod aeromacs;
+#[cfg(feature = "iec104")]
+pub mod iec104;
+
+// =============================================================================
+// Common infrastructure (always present)
+// =============================================================================
+
+pub mod common;
+
+// Re‑export common types for convenience
+pub use common::criticality::AviationCriticality;
+pub use common::threat::{Threat, ThreatType};
+pub use common::streaming::StreamingParser;
+pub use common::pool::{BufferPool, ParseError};
+pub use common::timestamp::TimestampNanos;
+
+// =============================================================================
+// Version information
+// =============================================================================
+
+/// Crate version (from Cargo.toml)
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Crate authors (from Cargo.toml)
+pub const AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
+/// Crate description (from Cargo.toml)
+pub const DESCRIPTION: &str = env!("CARGO_PKG_DESCRIPTION");
+/// Repository URL (from Cargo.toml)
+pub const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
+
+// =============================================================================
+// Prelude – one‑stop import for common types
+// =============================================================================
+
+/// The prelude module collects all commonly used types and functions.
+/// Import this to get everything you need for working with the library.
+pub mod prelude {
+    // Common types (always available)
+    pub use crate::common::criticality::AviationCriticality;
+    pub use crate::common::threat::{Threat, ThreatType};
+    pub use crate::common::streaming::StreamingParser;
+    pub use crate::common::pool::{BufferPool, ParseError};
+    pub use crate::common::timestamp::TimestampNanos;
+
+    // Re‑export parsers and their frames (conditionally)
+    #[cfg(feature = "adsb")]
+    pub use crate::adsb::{AdsbFrame, parse_adsb};
+    #[cfg(feature = "acars")]
+    pub use crate::acars::{AcarsFrame, parse_acars};
+    #[cfg(feature = "mode_s")]
+    pub use crate::mode_s::{ModeSFrame, parse_mode_s};
+    #[cfg(feature = "vdl")]
+    pub use crate::vdl::{VdlFrame, parse_vdl};
+    #[cfg(feature = "cpdlc")]
+    pub use crate::cpdlc::{CpdlcFrame, parse_cpdlc};
+    #[cfg(feature = "aeromacs")]
+    pub use crate::aeromacs::{AeroMacsFrame, parse_aeromacs};
+    #[cfg(feature = "iec104")]
+    pub use crate::iec104::{
+        parse_iec104, parse_enriched, Iec104Frame, EnrichedFrame,
+        Apci, UCmd, Cot, Quality, CriticalityLevel, InformationAddress,
+        InfoVal, InfoObj, Asdu,
+        // Re‑export streaming parser as Iec104StreamingParser to avoid name clash
+        StreamingParser as Iec104StreamingParser,
+        ParsePool,
+    };
+}
+
+// =============================================================================
+// Railway utilities (for backward compatibility, now adapted for aviation)
+// =============================================================================
+
+/// Utilities for interpreting IEC 104 frames in a railway context.
+/// This module is kept for compatibility with existing railway monitoring code,
+/// but also includes aviation‑specific helpers when needed.
+#[cfg(feature = "iec104")]
+pub mod railway {
+    use crate::iec104::{Iec104Frame, InfoVal, CriticalityLevel};
+
+    /// Represents a train identifier (railway context).
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    pub enum TrainId {
+        /// Mainline train.
+        Train(u16),
+        /// Shunting locomotive.
+        Shunt(u16),
+        /// Signal equipment.
+        Signal(u16),
+        /// Unknown kind.
+        Unknown(u16),
+    }
+
+    impl std::fmt::Display for TrainId {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                TrainId::Train(id) => write!(f, "TRAIN-{}", id),
+                TrainId::Shunt(id) => write!(f, "SHUNT-{}", id),
+                TrainId::Signal(id) => write!(f, "SIGNAL-{}", id),
+                TrainId::Unknown(id) => write!(f, "UNKNOWN-{}", id),
+            }
+        }
+    }
+
+    /// Emergency qualifier constant (0x7F).
+    pub const EMERGENCY_QUALIFIER: u8 = 0x7F;
+
+    /// Check if a parsed IEC104 frame contains a safety‑critical command.
+    pub fn is_safety_critical(frame: &Iec104Frame) -> bool {
+        if let Some(asdu) = &frame.asdu {
+            // Railway‑specific emergency types (private range)
+            if asdu.type_id == 105 || asdu.type_id == 120 {
+                return true;
+            }
+
+            for obj in &asdu.objects {
+                for val in &obj.values {
+                    match val {
+                        InfoVal::SingleCommand(_, qual, _) if *qual == EMERGENCY_QUALIFIER => return true,
+                        InfoVal::DoubleCommand(val, qual, _)
+                            if *qual == EMERGENCY_QUALIFIER && (*val == 1 || *val == 2) =>
+                        {
+                            return true;
+                        }
+                        InfoVal::SetpointNormalized(_, qual, _) if *qual == EMERGENCY_QUALIFIER => return true,
+                        InfoVal::SetpointScaled(_, qual, _) if *qual == EMERGENCY_QUALIFIER => return true,
+                        InfoVal::SetpointFloat(_, qual, _) if *qual == EMERGENCY_QUALIFIER => return true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if a command requires explicit operator confirmation.
+    pub fn requires_confirmation(frame: &Iec104Frame) -> bool {
+        if let Some(asdu) = &frame.asdu {
+            for obj in &asdu.objects {
+                for val in &obj.values {
+                    match val {
+                        InfoVal::SingleCommand(_, _, select) => if *select { return true; }
+                        InfoVal::DoubleCommand(_, _, select) => if *select { return true; }
+                        InfoVal::SetpointNormalized(_, _, select) => if *select { return true; }
+                        InfoVal::SetpointScaled(_, _, select) => if *select { return true; }
+                        InfoVal::SetpointFloat(_, _, select) => if *select { return true; }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Get train identifier from common address (simplified mapping).
+    pub fn train_id_from_ca(ca: u16) -> TrainId {
+        match ca {
+            0x0001..=0x0010 => TrainId::Train(ca),
+            0x1000..=0x1010 => TrainId::Shunt(ca - 0x0FFF),
+            0x2001..=0x2010 => TrainId::Signal(ca - 0x2000),
+            _ => TrainId::Unknown(ca),
+        }
+    }
+
+    /// Convert criticality level to a string suitable for UI.
+    pub fn severity_as_str(level: CriticalityLevel) -> &'static str {
+        match level {
+            CriticalityLevel::Normal => "INFO",
+            CriticalityLevel::High => "HIGH",
+            CriticalityLevel::Critical => "CRITICAL",
+            CriticalityLevel::SystemFault => "FAULT",
+        }
+    }
+}
+
+// =============================================================================
+// Performance benchmarks (optional – only when bench feature is enabled)
+// =============================================================================
+
+/// Benchmark modules (only compiled with the `bench` feature).
+#[cfg(all(feature = "bench", feature = "iec104"))]
+pub mod benches {
+    pub use crate::iec104::bench as iec104_bench;
+    
+    #[cfg(feature = "adsb")]
+    pub use crate::adsb::bench as adsb_bench;
+    #[cfg(feature = "acars")]
+    pub use crate::acars::bench as acars_bench;
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_version_defined() {
+        assert!(!VERSION.is_empty());
+        assert!(!AUTHORS.is_empty());
+        assert!(!DESCRIPTION.is_empty());
+    }
+
+    #[test]
+    fn test_prelude_imports() {
+        use prelude::*;
+        // Just verify that the prelude imports work
+        #[cfg(feature = "adsb")]
+        let _ = parse_adsb;
+        #[cfg(feature = "iec104")]
+        let _ = parse_iec104;
+    }
+
+    #[cfg(feature = "iec104")]
+    #[test]
+    fn test_railway_utils() {
+        use crate::iec104::*;
+
+        let normal_frame = Iec104Frame {
+            apci: Apci::S { recv: 0 },
+            asdu: None,
+        };
+        assert!(!railway::is_safety_critical(&normal_frame));
+
+        match railway::train_id_from_ca(0x0001) {
+            railway::TrainId::Train(1) => (),
+            _ => panic!("wrong train id"),
+        }
+    }
+}
