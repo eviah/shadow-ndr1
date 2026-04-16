@@ -58,6 +58,8 @@ pub mod iec104;
 // =============================================================================
 
 pub mod common;
+pub mod kafka;
+pub mod physics;
 
 // Re‑export common types for convenience
 pub use common::criticality::AviationCriticality;
