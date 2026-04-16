@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from loguru import logger
 from passlib.context import CryptContext
@@ -31,8 +31,8 @@ limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 settings = get_settings()
-security = HTTPBearer()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+security = HTTPBearer(auto_error=False)
+pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
 
 # =============================================================================
 # Pydantic models
@@ -172,10 +172,10 @@ async def register(request: Request, user_data: UserCreate, background_tasks: Ba
 
     return new_user
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login")
 @limiter.limit("10/minute")
-async def login(request: Request, login_data: LoginRequest):
-    """Authenticate user and return tokens."""
+async def login(request: Request, response: Response, login_data: LoginRequest):
+    """Authenticate user and set Secure HttpOnly cookies."""
     ip = request.client.host
     ua = request.headers.get("user-agent", "")
     user = await get_user_by_username(login_data.username)
@@ -203,27 +203,44 @@ async def login(request: Request, login_data: LoginRequest):
     access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
 
-    # Optionally store refresh token hash in DB for revocation
-    # await store_refresh_token(user["id"], refresh_token_hash)
-
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=settings.auth.access_token_expire_minutes * 60,
+    is_secure = not settings.is_development
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=is_secure,
+        samesite="strict",
+        max_age=settings.auth.access_token_expire_minutes * 60,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=is_secure,
+        samesite="strict",
+        max_age=settings.auth.refresh_token_expire_days * 24 * 60 * 60,
     )
 
-@router.post("/refresh", response_model=TokenResponse)
-async def refresh(request: RefreshRequest):
-    """Get a new access token using a valid refresh token."""
+    return {"message": "Login successful", "access_token": access_token}
+
+@router.post("/refresh")
+async def refresh(request: Request, response: Response, body: Optional[RefreshRequest] = None):
+    """Get a new access token using a valid refresh token from cookies."""
+    refresh_token = request.cookies.get("refresh_token")
+    if not refresh_token and body:
+        refresh_token = body.refresh_token
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Refresh token missing")
+        
     try:
         payload = jwt.decode(
-            request.refresh_token,
+            refresh_token,
             settings.auth.secret_key.get_secret_value(),
             algorithms=[settings.auth.algorithm]
         )
         if payload.get("type") != "refresh":
             raise jwt.PyJWTError
-        # Optionally verify refresh token not revoked
+            
         token_data = {
             "sub": payload["sub"],
             "user_id": payload["user_id"],
@@ -231,19 +248,24 @@ async def refresh(request: RefreshRequest):
             "org_id": payload["org_id"],
         }
         new_access = create_access_token(token_data)
-        # Return same refresh token (or issue new one)
-        return TokenResponse(
-            access_token=new_access,
-            refresh_token=request.refresh_token,
-            expires_in=settings.auth.access_token_expire_minutes * 60,
+        
+        response.set_cookie(
+            key="access_token",
+            value=new_access,
+            httponly=True,
+            secure=not settings.is_development,
+            samesite="strict",
+            max_age=settings.auth.access_token_expire_minutes * 60,
         )
+        return {"message": "Token refreshed"}
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
 @router.post("/logout")
-async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Logout (client discards token; optionally revoke refresh token)."""
-    # Optionally add token to a blacklist (Redis)
+async def logout(response: Response, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """Logout (clears cookies)."""
+    response.delete_cookie("access_token")
+    response.delete_cookie("refresh_token")
     return {"message": "Logged out"}
 
 @router.post("/change-password")
@@ -321,10 +343,16 @@ async def get_me(current_user: Dict = Depends(get_current_user)):
 # Dependency for token validation (used by other routes)
 # =============================================================================
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
-    """Validate access token and return user info."""
-    try:
+async def get_current_user(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Dict[str, Any]:
+    """Validate access token from cookie (fallback to Bearer) and return user info."""
+    token = request.cookies.get("access_token")
+    if not token and credentials:
         token = credentials.credentials
+        
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+        
+    try:
         payload = jwt.decode(
             token,
             settings.auth.secret_key.get_secret_value(),

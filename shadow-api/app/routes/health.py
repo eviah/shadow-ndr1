@@ -114,9 +114,10 @@ async def check_clickhouse() -> Dict[str, Any]:
     """Check ClickHouse connectivity."""
     start = time.time()
     try:
-        # Run in thread pool because clickhouse-driver is blocking
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: db.clickhouse.execute("SELECT 1"))
+        async with asyncio.timeout(2.0):
+            async with db.clickhouse_client.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("SELECT 1")
         latency = time.time() - start
         health_check_latency.labels(service="clickhouse").observe(latency)
         health_check_status.labels(service="clickhouse").set(1)
