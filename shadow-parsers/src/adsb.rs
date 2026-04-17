@@ -8,6 +8,11 @@
 use nom::bits::complete::take;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
+use lru::LruCache;
+use std::num::NonZeroUsize;
+
+#[cfg(feature = "golay")]
+use crate::golay::{GolayCodeword, GolayResult};
 
 // =============================================================================
 // Constants
@@ -68,6 +73,37 @@ pub struct AircraftIdentMsg {
     pub callsign: String,
 }
 
+/// Stateful CPR Position Decoder
+/// Maintains cache of even/odd frame pairs for proper CPR resolution
+pub struct CprPositionDecoder {
+    /// ICAO24 → (even_msg, odd_msg)
+    cache: LruCache<u32, (AirbornePositionMsg, AirbornePositionMsg)>,
+}
+
+impl CprPositionDecoder {
+    /// Create new CPR decoder (capacity 1000 aircraft)
+    pub fn new() -> Self {
+        CprPositionDecoder {
+            cache: LruCache::new(NonZeroUsize::new(1000).unwrap()),
+        }
+    }
+
+    /// Attempt to decode position from CPR-encoded coordinates
+    /// Requires even/odd frame pair for proper decoding
+    pub fn decode(&mut self, icao24: u32, msg: &AirbornePositionMsg) -> Option<(f64, f64)> {
+        // For now, stub implementation returning None
+        // Full CPR decoding would require ICAO Annex 10 NL table and even/odd resolution
+        // This is a placeholder for the architecture
+        None
+    }
+}
+
+impl Default for CprPositionDecoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AdsbError {
     #[error("Not enough data to parse ADS-B 112-bit message")]
@@ -96,6 +132,29 @@ pub fn parse_adsb(data: &[u8]) -> Result<AdsbFrame, AdsbError> {
 
     // Hardware-accelerated (or loop-based) parity check
     if !validate_crc24q(frame_bytes) {
+        // If CRC fails and Golay feature enabled, attempt single-bit correction
+        #[cfg(feature = "golay")]
+        {
+            if frame_bytes.len() >= 14 {
+                let parity_bytes = &frame_bytes[11..14];
+                let codeword = GolayCodeword::from_bytes(parity_bytes[0], parity_bytes[1], parity_bytes[2]);
+                let (_, result) = codeword.decode();
+
+                match result {
+                    GolayResult::Corrected(bit_pos) => {
+                        // Single-bit error correction successful
+                        // Apply correction to frame_bytes (would require mutable copy)
+                        // For now, log the correction but fail gracefully
+                        return Err(AdsbError::CrcMismatch); // Placeholder
+                    }
+                    _ => return Err(AdsbError::CrcMismatch),
+                }
+            } else {
+                return Err(AdsbError::CrcMismatch);
+            }
+        }
+
+        #[cfg(not(feature = "golay"))]
         return Err(AdsbError::CrcMismatch);
     }
 
