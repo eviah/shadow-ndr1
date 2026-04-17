@@ -6,7 +6,7 @@
 //! it instantaneously identifies GPS spoofing, Ghost Aircraft injections, and 
 //! impossible telemetry without needing external ML/backend round-trips.
 
-use log::{info, warn};
+use tracing::{info, warn};
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;

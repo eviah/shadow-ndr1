@@ -16,7 +16,15 @@ mode_s = []
 vdl = []
 cpdlc = []
 aeromacs = []
-full = ["iec104", "adsb", "acars", "mode_s", "vdl", "cpdlc", "aeromacs"]
+golay = []
+mlat = []
+signal = []
+spoofing = []
+geofencing = []
+uat = []
+tisb = []
+full_avionics = ["iec104", "adsb", "acars", "mode_s", "vdl", "cpdlc", "aeromacs", "golay", "mlat", "signal", "spoofing", "geofencing", "uat", "tisb"]
+full = ["full_avionics"]
 
 [dependencies]
 # Concurrency & Async
@@ -51,7 +59,9 @@ anyhow = "1.0"
 thiserror = "1.0"
 clap = { version = "4.4", features = ["derive"] }
 ctrlc = "3.4"
-rskafka = "0.6.0"
+parking_lot = "0.12"
+regex = "1.12"
+bincode = "1.3"
 
 [[bin]]
 name = "shadow-sensor"

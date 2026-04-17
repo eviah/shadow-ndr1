@@ -54,6 +54,43 @@ pub mod aeromacs;
 pub mod iec104;
 
 // =============================================================================
+// World-class upgrade modules (feature‑gated)
+// =============================================================================
+
+#[cfg(feature = "golay")]
+pub mod golay;
+#[cfg(feature = "mlat")]
+pub mod mlat;
+#[cfg(feature = "signal")]
+pub mod signal_analysis;
+#[cfg(feature = "spoofing")]
+pub mod spoofing_detector;
+#[cfg(feature = "geofencing")]
+pub mod geofencing;
+#[cfg(feature = "uat")]
+pub mod uat;
+#[cfg(feature = "tisb")]
+pub mod tisb;
+
+// Additional threat detection modules (to be implemented)
+// #[cfg(feature = "icao_validator")]
+// pub mod icao_validator;
+// #[cfg(feature = "burst")]
+// pub mod burst_detector;
+// #[cfg(feature = "baseline")]
+// pub mod baseline_scorer;
+// #[cfg(feature = "modulation")]
+// pub mod modulation;
+// #[cfg(feature = "consensus")]
+// pub mod mesh_consensus;
+// #[cfg(feature = "external")]
+// pub mod external_validation;
+// #[cfg(feature = "correlation")]
+// pub mod threat_correlation;
+// #[cfg(feature = "dedup")]
+// pub mod deduplicator;
+
+// =============================================================================
 // Common infrastructure (always present)
 // =============================================================================
 
@@ -117,6 +154,22 @@ pub mod prelude {
         StreamingParser as Iec104StreamingParser,
         ParsePool,
     };
+
+    // World-class upgrade modules
+    #[cfg(feature = "golay")]
+    pub use crate::golay::{GolayCodeword, GolayResult};
+    #[cfg(feature = "mlat")]
+    pub use crate::mlat::{MlatEngine, MlatSensor, MlatSolution, ToaMeasurement};
+    #[cfg(feature = "signal")]
+    pub use crate::signal_analysis::{RssiTracker, RssiAnomaly};
+    #[cfg(feature = "spoofing")]
+    pub use crate::spoofing_detector::{SpoofingDetector, SpoofingIndicator, RfFingerprint};
+    #[cfg(feature = "geofencing")]
+    pub use crate::geofencing::{GeofenceEngine, GeofenceZone, ZoneType};
+    #[cfg(feature = "uat")]
+    pub use crate::uat::{UatFrame, parse_uat};
+    #[cfg(feature = "tisb")]
+    pub use crate::tisb::{TisbFrame, parse_tisb};
 }
 
 // =============================================================================

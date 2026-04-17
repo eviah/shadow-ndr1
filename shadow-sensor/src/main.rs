@@ -20,6 +20,16 @@ mod parser;
 mod threat;
 mod protocols;
 
+// ============================================================================
+// WORLD-CLASS UPGRADES - Shadow Sensor v2.0
+// ============================================================================
+mod ai_engine;           // AI/ML Threat Intelligence
+mod distributed_mesh;    // Multi-sensor distributed coordination
+mod quantum_crypto;      // Post-quantum cryptography
+mod threat_hunter;       // Automated threat hunting
+mod hw_accel;           // Hardware acceleration (DPDK, AF_XDP, GPU)
+mod analytics;          // Advanced real-time analytics engine
+
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::signal;
@@ -64,10 +74,32 @@ async fn main() -> Result<()> {
     let metrics_handle = metrics.start_http_server(config.metrics_port)?;
     info!(port = config.metrics_port, "📊 Metrics endpoint");
 
-    // 4. Create packet processor (shared across capture threads)
+    // 4. Initialize World-Class Upgrade Engines
+    let ai_engine = ai_engine::AIThreatEngine::new(0.75);
+    info!("🤖 AI Threat Intelligence Engine initialized (sensitivity=0.75)");
+
+    let distributed_mesh = distributed_mesh::DistributedMesh::new("sensor-primary".to_string());
+    info!("🌐 Distributed Mesh Network initialized");
+
+    let quantum_crypto = quantum_crypto::QuantumCryptoEngine::new(true, "Kyber1024".to_string());
+    info!("🔐 Quantum-Ready Cryptography (hybrid PQC) initialized");
+
+    let threat_hunter = threat_hunter::ThreatHunter::new();
+    info!("🔍 Automated Threat Hunting Engine initialized");
+
+    let mut hw_accel = hw_accel::HardwareAccelerator::new(hw_accel::AccelerationConfig::default());
+    match hw_accel.initialize().await {
+        Ok(msg) => info!("⚡ Hardware Acceleration: {}", msg),
+        Err(e) => warn!("⚠️ Hardware Acceleration unavailable: {}", e),
+    }
+
+    let analytics = analytics::AnalyticsEngine::new();
+    info!("📊 Advanced Analytics Engine initialized");
+
+    // 5. Create packet processor (shared across capture threads)
     let processor = match processor::PacketProcessor::new(Arc::clone(&metrics), config.clone()).await {
         Ok(p) => {
-            info!("Packet processor initialized (retry={}, batch={})", 
+            info!("Packet processor initialized (retry={}, batch={})",
                   config.retry_attempts, config.batch_size);
             Arc::new(p)
         }

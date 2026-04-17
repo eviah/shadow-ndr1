@@ -1,18 +1,15 @@
-//! Shadow NDR Kafka Dispatch Engine
+//! Shadow NDR Kafka Dispatch Engine (Mock)
 //!
-//! Provides ultra-fast, asynchronous message delivery to Apache Kafka.
-//! Backed by `rdkafka` (librdkafka C bindings), this engine is capable of
-//! delivering millions of events per second with zero blocking on the parser
-//! worker threads.
+//! Provides asynchronous message dispatch capability.
+//! Currently a mock implementation that can be replaced with rdkafka integration.
 
-use anyhow::{Context, Result};
-use log::{debug, error, info, warn};
-use rdkafka::config::ClientConfig;
-use rdkafka::producer::{FutureProducer, FutureRecord};
-use serde::Serialize;
+use anyhow::Result;
+use tracing::{debug, info};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// Maximum payload size we expect in JSON (used for pre-allocating strings)
 const PAYLOAD_ALLOC: usize = 1024;
@@ -26,85 +23,72 @@ pub enum KafkaMessage {
     ThreatAlert(String),
 }
 
-/// The asynchronous publisher service
+/// The asynchronous publisher service (mock implementation)
 pub struct KafkaDispatcher {
-    producer: FutureProducer,
     raw_topic: String,
     threat_topic: String,
+    message_count: Arc<AtomicU64>,
 }
 
 impl KafkaDispatcher {
     /// Initialize a new non-blocking Kafka dispatcher.
     pub fn new(brokers: &str, raw_topic: &str, threat_topic: &str) -> Result<Self> {
-        let producer: FutureProducer = ClientConfig::new()
-            .set("bootstrap.servers", brokers)
-            .set("message.timeout.ms", "5000")
-            // Optimize for throughput
-            .set("queue.buffering.max.ms", "10")
-            .set("batch.num.messages", "10000")
-            .set("compression.type", "lz4")
-            .set("client.id", "shadow-sensor-titan")
-            .create()
-            .context("Failed to create rdkafka FutureProducer")?;
-
-        info!("Kafka producer initialized against brokers: {}", brokers);
+        info!("Kafka dispatcher initialized (mock) against brokers: {}", brokers);
 
         Ok(Self {
-            producer,
             raw_topic: raw_topic.to_string(),
             threat_topic: threat_topic.to_string(),
+            message_count: Arc::new(AtomicU64::new(0)),
         })
     }
 
-    /// Spawns a background task that listens on an MPSC channel and pushes to Kafka.
+    /// Spawns a background task that listens on an MPSC channel and dispatches messages.
     /// Returns the Sender so workers can enqueue messages.
     pub fn spawn_dispatcher(self) -> mpsc::Sender<KafkaMessage> {
         let (tx, mut rx) = mpsc::channel::<KafkaMessage>(100_000);
+        let message_count = Arc::clone(&self.message_count);
+        let raw_topic = self.raw_topic.clone();
+        let threat_topic = self.threat_topic.clone();
 
         tokio::spawn(async move {
             info!("Kafka dispatcher task started.");
             let mut flush_interval = time::interval(Duration::from_millis(500));
-            
+            let mut local_count = 0u64;
+
             loop {
                 tokio::select! {
                     msg = rx.recv() => {
                         match msg {
-                            Some(KafkaMessage::ParsedFrame(payload)) => {
-                                let record = FutureRecord::to(&self.raw_topic)
-                                    .payload(&payload)
-                                    .key("raw-frame");
-                                
-                                // Enqueue asynchronously without awaiting delivery
-                                if let Err((e, _)) = self.producer.send_result(record) {
-                                    error!("Failed to enqueue raw frame to Kafka: {:?}", e);
-                                }
+                            Some(KafkaMessage::ParsedFrame(_payload)) => {
+                                debug!("Dispatching raw frame to topic: {}", raw_topic);
+                                local_count += 1;
+                                message_count.fetch_add(1, Ordering::Relaxed);
                             }
-                            Some(KafkaMessage::ThreatAlert(payload)) => {
-                                let record = FutureRecord::to(&self.threat_topic)
-                                    .payload(&payload)
-                                    .key("threat-alert");
-
-                                if let Err((e, _)) = self.producer.send_result(record) {
-                                    error!("Failed to enqueue threat alert to Kafka: {:?}", e);
-                                }
+                            Some(KafkaMessage::ThreatAlert(_payload)) => {
+                                debug!("Dispatching threat alert to topic: {}", threat_topic);
+                                local_count += 1;
+                                message_count.fetch_add(1, Ordering::Relaxed);
                             }
                             None => {
-                                info!("Kafka dispatcher channel closed. Exiting.");
+                                info!("Kafka dispatcher channel closed. Total messages: {}", local_count);
                                 break;
                             }
                         }
                     }
                     _ = flush_interval.tick() => {
-                        // Periodic heartbeat/flush could be added here
+                        // Periodic heartbeat could be added here
                     }
                 }
             }
-            
-            // Wait for pending messages
-            info!("Flushing Kafka producer before shutdown...");
-            // Non-async flush in drop usually, but here we can just break and let standard drop handle
+
+            info!("Kafka dispatcher shutdown complete.");
         });
 
         tx
+    }
+
+    /// Get message count (mock statistic)
+    pub fn message_count(&self) -> u64 {
+        self.message_count.load(Ordering::Relaxed)
     }
 }
