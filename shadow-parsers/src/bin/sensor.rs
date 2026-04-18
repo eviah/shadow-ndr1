@@ -36,6 +36,18 @@ use shadow_parsers::icao_validator::{IcaoValidator, IcaoValidationResult};
 use shadow_parsers::burst_detector::{BurstDetector, BurstIndicator};
 #[cfg(feature = "baseline")]
 use shadow_parsers::baseline_scorer::BaselineScorer;
+#[cfg(feature = "signal")]
+use shadow_parsers::signal_analysis::RssiTracker;
+#[cfg(feature = "spoofing")]
+use shadow_parsers::spoofing_detector::SpoofingDetector;
+#[cfg(feature = "geofencing")]
+use shadow_parsers::geofencing::GeofenceEngine;
+#[cfg(feature = "modulation")]
+use shadow_parsers::modulation::ModulationSample;
+#[cfg(feature = "external_validation")]
+use shadow_parsers::external_validation::ExternalValidator;
+#[cfg(feature = "deduplicator")]
+use shadow_parsers::deduplicator::PacketDeduplicator;
 #[cfg(feature = "consensus")]
 use shadow_parsers::mesh_consensus::{MeshConsensus, SensorReport};
 #[cfg(feature = "correlation")]
@@ -125,6 +137,16 @@ pub struct WorkerState {
     burst_detector: BurstDetector,
     #[cfg(feature = "baseline")]
     baseline_scorer: BaselineScorer,
+    #[cfg(feature = "signal")]
+    rssi_tracker: RssiTracker,
+    #[cfg(feature = "spoofing")]
+    spoofing_detector: SpoofingDetector,
+    #[cfg(feature = "geofencing")]
+    geofence_engine: GeofenceEngine,
+    #[cfg(feature = "external_validation")]
+    external_validator: ExternalValidator,
+    #[cfg(feature = "deduplicator")]
+    deduplicator: PacketDeduplicator,
 }
 
 impl WorkerState {
@@ -138,6 +160,16 @@ impl WorkerState {
             burst_detector: BurstDetector::new(),
             #[cfg(feature = "baseline")]
             baseline_scorer: BaselineScorer::new(),
+            #[cfg(feature = "signal")]
+            rssi_tracker: RssiTracker::new(),
+            #[cfg(feature = "spoofing")]
+            spoofing_detector: SpoofingDetector::new(),
+            #[cfg(feature = "geofencing")]
+            geofence_engine: GeofenceEngine::new(),
+            #[cfg(feature = "external_validation")]
+            external_validator: ExternalValidator::new(),
+            #[cfg(feature = "deduplicator")]
+            deduplicator: PacketDeduplicator::new(),
         }
     }
 }
