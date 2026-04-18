@@ -5,9 +5,9 @@ services:
     environment:
       POSTGRES_DB: shadow_ndr
       POSTGRES_USER: shadow
-      POSTGRES_PASSWORD: shadow123
+      POSTGRES_PASSWORD: shadow-prod-2026
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -37,7 +37,7 @@ services:
     image: redis:7-alpine
     container_name: shadow-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     networks:
       - shadow-network
 
@@ -47,8 +47,8 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9094
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9094
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
@@ -62,7 +62,7 @@ services:
       KAFKA_NUM_PARTITIONS: 1
       KAFKA_HEAP_OPTS: "-Xmx256M -Xms128M"
     ports:
-      - "9092:9092"
+      - "9093:9092"
     networks:
       - shadow-network
     restart: unless-stopped
@@ -73,12 +73,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://shadow:shadow123@postgres:5432/shadow_ndr
+      - DATABASE_URL=postgresql://shadow:shadow-prod-2026@postgres:5432/shadow_ndr
       - REDIS_URL=redis://redis:6379
       - KAFKA_BROKERS=kafka:9092
       - CLICKHOUSE_HOST=clickhouse
       - ML_API_URL=http://shadow-ml:8001
-      - SECRET_KEY=your-super-secret-key-change-in-production
+      - SECRET_KEY=shadow-prod-investor-demo-2026
     volumes:
       - ./shadow-api:/app
       - api_models:/app/models
@@ -101,8 +101,9 @@ services:
     ports:
       - "8001:8001"
     environment:
-      - DATABASE_URL=postgresql://shadow:shadow123@postgres:5432/shadow_ndr
+      - DATABASE_URL=postgresql://shadow:shadow-prod-2026@postgres:5432/shadow_ndr
       - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
     volumes:
       - ./shadow-ml:/app
       - ml_models:/app/models
@@ -141,7 +142,7 @@ services:
       - SHADOW_POSTGRES_PORT=5432
       - SHADOW_POSTGRES_DATABASE=shadow_ndr
       - SHADOW_POSTGRES_USER=shadow
-      - SHADOW_POSTGRES_PASSWORD=shadow123
+      - SHADOW_POSTGRES_PASSWORD=shadow-prod-2026
       - SHADOW_REDIS_HOST=redis
       - SHADOW_REDIS_PORT=6379
       - SHADOW_ML_URL=http://shadow-ml:8001
@@ -168,6 +169,54 @@ services:
       - shadow-network
     restart: unless-stopped
 
+  sensor:
+    build:
+      context: ./shadow-parsers
+      dockerfile: Dockerfile
+    container_name: shadow-sensor
+    environment:
+      - RUST_LOG=info
+    depends_on:
+      kafka:
+        condition: service_started
+    ports:
+      - "9999:9999/udp"
+    networks:
+      - shadow-network
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: shadow-prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    networks:
+      - shadow-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: shadow-grafana
+    ports:
+      - "3002:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: shadow-investor-2026
+      GF_SECURITY_ADMIN_USER: admin
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - ./monitoring/grafana-provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - shadow-network
+    restart: unless-stopped
+
 networks:
   shadow-network:
     driver: bridge
@@ -177,3 +226,5 @@ volumes:
   clickhouse_data:
   api_models:
   ml_models:
+  prometheus_data:
+  grafana_data:
