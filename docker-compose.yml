@@ -117,7 +117,7 @@ services:
     restart: unless-stopped
 
   shadow-ui:
-    build: ./shadow-ui
+    build: ./multi-tenant/frontend
     container_name: shadow-ui
     ports:
       - "3000:80"

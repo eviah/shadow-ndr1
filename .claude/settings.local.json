@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/liorh/.claude/projects/c--Users-liorh-shadow-ndr/**)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(docker-compose -f /c/Users/liorh/shadow-ndr/docker-compose.yml ps)"
+    ]
+  }
+}
