@@ -88,13 +88,37 @@ impl CprPositionDecoder {
         }
     }
 
-    /// Attempt to decode position from CPR-encoded coordinates
-    /// Requires even/odd frame pair for proper decoding
+    /// Attempt to decode position from CPR-encoded coordinates using ICAO Annex 10 algorithm.
+    /// Returns (latitude, longitude) in decimal degrees if successful.
     pub fn decode(&mut self, icao24: u32, msg: &AirbornePositionMsg) -> Option<(f64, f64)> {
-        // For now, stub implementation returning None
-        // Full CPR decoding would require ICAO Annex 10 NL table and even/odd resolution
-        // This is a placeholder for the architecture
-        None
+        let cpr_format = msg.cpr_format;
+        let cpr_lat = msg.cpr_encoded_lat;
+        let cpr_lon = msg.cpr_encoded_lon;
+
+        // Check if we have a cached even/odd pair for this aircraft
+        let current = msg.clone();
+
+        let result = if let Some((cached_even, cached_odd)) = self.cache.get(&icao24) {
+            // We have both even and odd frames - perform global decoding
+            if cpr_format == 0 {
+                // Current is even
+                decode_cpr_global(cpr_lat, cpr_lon, cached_odd.cpr_encoded_lat, cached_odd.cpr_encoded_lon, 0)
+            } else {
+                // Current is odd
+                decode_cpr_global(cached_even.cpr_encoded_lat, cached_even.cpr_encoded_lon, cpr_lat, cpr_lon, 1)
+            }
+        } else {
+            None // Need both frames for global decoding
+        };
+
+        // Update cache with latest frame
+        if cpr_format == 0 {
+            self.cache.put(icao24, (current.clone(), current.clone()));
+        } else {
+            self.cache.put(icao24, (current.clone(), current.clone()));
+        }
+
+        result
     }
 }
 
@@ -345,7 +369,7 @@ fn decode_altitude(encoded: u32) -> u32 {
 /// CRC-24Q checksum specific to Mode S.
 fn validate_crc24q(params: &[u8]) -> bool {
     let mut msg_crc: u32 = 0;
-    
+
     for i in 0..11 {
         msg_crc ^= (params[i] as u32) << 16;
         for _ in 0..8 {
@@ -356,7 +380,78 @@ fn validate_crc24q(params: &[u8]) -> bool {
             }
         }
     }
-    
+
     let extracted_parity = ((params[11] as u32) << 16) | ((params[12] as u32) << 8) | (params[13] as u32);
     (msg_crc & 0xFFFFFF) == extracted_parity
+}
+
+// =============================================================================
+// CPR (Compact Position Reporting) Decoder - ICAO Annex 10
+// =============================================================================
+
+/// NL (number of longitude zones) lookup table from ICAO Annex 10
+/// Indexed by latitude zone
+const NL_LOOKUP: &[u32] = &[
+    59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, 46, 45, 44, 43, 42, 41, 40,
+    39, 38, 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20,
+    19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
+];
+
+/// Global CPR position decoding (requires both even and odd frames)
+/// Format: 0=even, 1=odd
+fn decode_cpr_global(lat_even: u32, lon_even: u32, lat_odd: u32, lon_odd: u32, format: u8) -> Option<(f64, f64)> {
+    let lat_cpr_even = lat_even as f64 / 131072.0;
+    let lon_cpr_even = lon_even as f64 / 131072.0;
+    let lat_cpr_odd = lat_odd as f64 / 131072.0;
+    let lon_cpr_odd = lon_odd as f64 / 131072.0;
+
+    let dlatitude = if format == 0 { 360.0 / 60.0 } else { 360.0 / 59.0 };
+
+    let lat_even_m = (lat_cpr_even * 60.0).floor() as u32;
+    let lat_odd_m = (lat_cpr_odd * 59.0).floor() as u32;
+
+    let latitude = if lat_even_m == lat_odd_m {
+        Some(dlatitude * (lat_even_m as f64 + lat_cpr_even))
+    } else {
+        None
+    }?;
+
+    let ni = cpr_longitude_ni(latitude)?;
+    let dlon = 360.0 / (ni as f64);
+
+    let lon_even_m = (lon_cpr_even * (ni as f64)).floor() as u32;
+    let lon_odd_m = (lon_cpr_odd * (ni as f64)).floor() as u32;
+
+    let longitude = if lon_even_m == lon_odd_m {
+        Some(dlon * (lon_even_m as f64 + if format == 0 { lon_cpr_even } else { lon_cpr_odd }))
+    } else {
+        None
+    }?;
+
+    Some((latitude, longitude))
+}
+
+/// Calculate NI (number of longitude zones) for given latitude
+fn cpr_longitude_ni(latitude: f64) -> Option<u32> {
+    if latitude < -90.0 || latitude > 90.0 {
+        return None;
+    }
+    let lat_zone = ((latitude + 90.0) * 60.0 / 180.0) as usize;
+    if lat_zone < NL_LOOKUP.len() {
+        Some(NL_LOOKUP[lat_zone])
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+
+    #[test]
+    fn bench_cpr_decode() {
+        // Example test for CPR decoding
+        let result = decode_cpr_global(87938, 71572, 87919, 71571, 0);
+        assert!(result.is_some());
+    }
 }

@@ -72,23 +72,17 @@ pub mod uat;
 #[cfg(feature = "tisb")]
 pub mod tisb;
 
-// Additional threat detection modules (to be implemented)
-// #[cfg(feature = "icao_validator")]
-// pub mod icao_validator;
-// #[cfg(feature = "burst")]
-// pub mod burst_detector;
-// #[cfg(feature = "baseline")]
-// pub mod baseline_scorer;
-// #[cfg(feature = "modulation")]
-// pub mod modulation;
-// #[cfg(feature = "consensus")]
-// pub mod mesh_consensus;
-// #[cfg(feature = "external")]
-// pub mod external_validation;
-// #[cfg(feature = "correlation")]
-// pub mod threat_correlation;
-// #[cfg(feature = "dedup")]
-// pub mod deduplicator;
+// Additional threat detection modules (world-class upgrades)
+#[cfg(feature = "icao_validator")]
+pub mod icao_validator;
+#[cfg(feature = "burst")]
+pub mod burst_detector;
+#[cfg(feature = "baseline")]
+pub mod baseline_scorer;
+#[cfg(feature = "consensus")]
+pub mod mesh_consensus;
+#[cfg(feature = "correlation")]
+pub mod threat_correlation;
 
 // =============================================================================
 // Common infrastructure (always present)
@@ -170,6 +164,18 @@ pub mod prelude {
     pub use crate::uat::{UatFrame, parse_uat};
     #[cfg(feature = "tisb")]
     pub use crate::tisb::{TisbFrame, parse_tisb};
+
+    // Advanced threat detection modules
+    #[cfg(feature = "icao_validator")]
+    pub use crate::icao_validator::{IcaoValidator, IcaoRegistration, IcaoValidationResult};
+    #[cfg(feature = "burst")]
+    pub use crate::burst_detector::{BurstDetector, BurstIndicator, AircraftTrack};
+    #[cfg(feature = "baseline")]
+    pub use crate::baseline_scorer::{BaselineScorer, FlightProfile, BaselineDeviation};
+    #[cfg(feature = "consensus")]
+    pub use crate::mesh_consensus::{MeshConsensus, SensorReport, ConsensusSolution};
+    #[cfg(feature = "correlation")]
+    pub use crate::threat_correlation::{ThreatCorrelator, ThreatEvent, ThreatEventType, CorrelationCluster};
 }
 
 // =============================================================================

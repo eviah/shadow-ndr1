@@ -24,7 +24,7 @@ from slowapi.errors import RateLimitExceeded
 
 from .config import get_settings
 from .db import db
-from .routes import health, threats, assets, ml, auth
+from .routes import health, threats, assets, ml, auth, sensor_integration
 
 # =============================================================================
 # Settings
@@ -140,13 +140,21 @@ async def lifespan(app: FastAPI):
     try:
         await db.connect()
         logger.info("✅ Database connections established")
+        db_connected = True
     except Exception as e:
-        logger.critical(f"❌ Database connection failed: {e}")
-        raise
+        logger.warning(f"⚠️  Database connection failed (continuing without DB): {e}")
+        db_connected = False
+        app.state.db_connected = False
+
+    if db_connected:
+        app.state.db_connected = True
+
     yield
+
     # Shutdown
     logger.info("🛑 Shutting down...")
-    await db.close()
+    if db_connected:
+        await db.close()
     logger.info("✅ Graceful shutdown complete")
 
 # =============================================================================
@@ -201,6 +209,7 @@ api_v1.include_router(threats.router)
 api_v1.include_router(assets.router)
 api_v1.include_router(ml.router)
 api_v1.include_router(auth.router)
+api_v1.include_router(sensor_integration.router)
 
 app.mount("/api/v1", api_v1)
 
@@ -210,6 +219,7 @@ app.include_router(threats.router)
 app.include_router(assets.router)
 app.include_router(ml.router)
 app.include_router(auth.router)
+app.include_router(sensor_integration.router)
 
 # =============================================================================
 # Root endpoint

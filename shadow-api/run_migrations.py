@@ -19,13 +19,16 @@ logger.add(sys.stderr, level="INFO", format="<level>{level: <8}</level> | {messa
 async def run_migrations():
     """Run all pending database migrations."""
     
-    # Database configuration
+    from app.config import get_settings
+    settings = get_settings()
+    
+    # Database configuration from settings
     db_config = {
-        "host": "localhost",
-        "port": 5432,
-        "user": "postgres",
-        "password": "shadow123",
-        "database": "shadow",
+        "host": settings.database.host,
+        "port": settings.database.port,
+        "user": settings.database.user,
+        "password": settings.database.password.get_secret_value(),
+        "database": settings.database.database,
         "command_timeout": 60,
     }
     

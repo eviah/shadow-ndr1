@@ -1,0 +1,609 @@
+---
+# Shadow NDR - Production Kubernetes Deployment
+# Enterprise-grade multi-replica setup with auto-scaling
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shadow-ndr
+---
+# ConfigMap for application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shadow-config
+  namespace: shadow-ndr
+data:
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  KAFKA_BROKERS: "kafka-0.kafka-service:9092,kafka-1.kafka-service:9092,kafka-2.kafka-service:9092"
+  DATABASE_HOST: "postgres-primary"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "shadow_ndr"
+  REDIS_URL: "redis://redis-cluster:6379"
+  API_REPLICAS: "3"
+  ML_REPLICAS: "2"
+  SENSOR_REPLICAS: "3"
+---
+# PostgreSQL StatefulSet (HA with replication)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: shadow-ndr
+spec:
+  serviceName: postgres
+  replicas: 3
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_DB
+          value: shadow_ndr
+        - name: POSTGRES_USER
+          value: shadow
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: password
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U shadow
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U shadow
+          initialDelaySeconds: 5
+          periodSeconds: 5
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "fast-ssd"
+      resources:
+        requests:
+          storage: 100Gi
+---
+# PostgreSQL Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: shadow-ndr
+spec:
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+    name: postgres
+---
+# Kafka StatefulSet (HA cluster)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: shadow-ndr
+spec:
+  serviceName: kafka-service
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+      - name: kafka
+        image: apache/kafka:latest
+        ports:
+        - containerPort: 9092
+          name: kafka
+        env:
+        - name: KAFKA_NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.ordinal
+        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+          value: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+        - name: KAFKA_ADVERTISED_LISTENERS
+          value: PLAINTEXT://$(HOSTNAME).kafka-service:9092
+        - name: KAFKA_PROCESS_ROLES
+          value: broker,controller
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: "3"
+        - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+          value: "2"
+        - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+          value: "true"
+        volumeMounts:
+        - name: kafka-data
+          mountPath: /var/lib/kafka/data
+  volumeClaimTemplates:
+  - metadata:
+      name: kafka-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "fast-ssd"
+      resources:
+        requests:
+          storage: 100Gi
+---
+# Kafka Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-service
+  namespace: shadow-ndr
+spec:
+  clusterIP: None
+  selector:
+    app: kafka
+  ports:
+  - port: 9092
+    name: kafka
+---
+# Redis StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: shadow-ndr
+spec:
+  serviceName: redis-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "fast-ssd"
+      resources:
+        requests:
+          storage: 50Gi
+---
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: shadow-ndr
+spec:
+  selector:
+    app: redis
+  ports:
+  - port: 6379
+    name: redis
+---
+# Shadow API Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shadow-api
+  namespace: shadow-ndr
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: shadow-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: shadow-api
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - shadow-api
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: shadow-api
+        image: shadow-api:v2.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: url
+        - name: KAFKA_BROKERS
+          valueFrom:
+            configMapKeyRef:
+              name: shadow-config
+              key: KAFKA_BROKERS
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: shadow-config
+              key: REDIS_URL
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: shadow-config
+              key: ENVIRONMENT
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "500m"
+          limits:
+            memory: "512Mi"
+            cpu: "1000m"
+---
+# Shadow API Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: shadow-api
+  namespace: shadow-ndr
+spec:
+  selector:
+    app: shadow-api
+  type: LoadBalancer
+  ports:
+  - port: 8000
+    targetPort: 8000
+    name: http
+---
+# Shadow ML Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shadow-ml
+  namespace: shadow-ndr
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: shadow-ml
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: shadow-ml
+    spec:
+      containers:
+      - name: shadow-ml
+        image: shadow-ml:v10.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8001
+          name: http
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: url
+        - name: KAFKA_BROKERS
+          valueFrom:
+            configMapKeyRef:
+              name: shadow-config
+              key: KAFKA_BROKERS
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: shadow-config
+              key: REDIS_URL
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "1000m"
+          limits:
+            memory: "1Gi"
+            cpu: "2000m"
+---
+# Shadow ML Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: shadow-ml
+  namespace: shadow-ndr
+spec:
+  selector:
+    app: shadow-ml
+  ports:
+  - port: 8001
+    targetPort: 8001
+    name: http
+---
+# Shadow Sensor Deployment (DaemonSet for multi-sensor)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shadow-sensor
+  namespace: shadow-ndr
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: shadow-sensor
+  template:
+    metadata:
+      labels:
+        app: shadow-sensor
+    spec:
+      containers:
+      - name: shadow-sensor
+        image: shadow-sensor:v11.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9999
+          protocol: UDP
+          name: adsb
+        env:
+        - name: KAFKA_BROKERS
+          valueFrom:
+            configMapKeyRef:
+              name: shadow-config
+              key: KAFKA_BROKERS
+        - name: UDP_PORT
+          value: "9999"
+        - name: WORKERS
+          value: "4"
+        - name: SENSOR_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "500m"
+          limits:
+            memory: "512Mi"
+            cpu: "1000m"
+---
+# Prometheus Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: shadow-ndr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+      - name: prometheus
+        image: prom/prometheus:latest
+        ports:
+        - containerPort: 9090
+        volumeMounts:
+        - name: prometheus-config
+          mountPath: /etc/prometheus
+        - name: prometheus-data
+          mountPath: /prometheus
+        args:
+        - '--config.file=/etc/prometheus/prometheus.yml'
+        - '--storage.tsdb.path=/prometheus'
+        - '--storage.tsdb.retention.time=30d'
+      volumes:
+      - name: prometheus-config
+        configMap:
+          name: prometheus-config
+      - name: prometheus-data
+        emptyDir: {}
+---
+# Prometheus Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: shadow-ndr
+spec:
+  selector:
+    app: prometheus
+  ports:
+  - port: 9090
+    targetPort: 9090
+---
+# Grafana Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: shadow-ndr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: grafana-credentials
+              key: password
+        - name: GF_INSTALL_PLUGINS
+          value: "grafana-piechart-panel"
+        volumeMounts:
+        - name: grafana-data
+          mountPath: /var/lib/grafana
+      volumes:
+      - name: grafana-data
+        emptyDir: {}
+---
+# Grafana Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: shadow-ndr
+spec:
+  selector:
+    app: grafana
+  type: LoadBalancer
+  ports:
+  - port: 3000
+    targetPort: 3000
+---
+# Pod Disruption Budget for API
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: shadow-api-pdb
+  namespace: shadow-ndr
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: shadow-api
+---
+# Pod Disruption Budget for ML
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: shadow-ml-pdb
+  namespace: shadow-ndr
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: shadow-ml
+---
+# Horizontal Pod Autoscaler for API
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: shadow-api-hpa
+  namespace: shadow-ndr
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: shadow-api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+# Horizontal Pod Autoscaler for ML
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: shadow-ml-hpa
+  namespace: shadow-ndr
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: shadow-ml
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 75

@@ -149,7 +149,50 @@ async def log_auth_attempt(username: str, success: bool, ip: str, user_agent: st
         )
 
 # =============================================================================
-# Routes
+# Dependency Functions (MUST be defined before endpoints use them)
+# =============================================================================
+
+async def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> Dict[str, Any]:
+    """Validate access token from cookie (fallback to Bearer) and return user info."""
+    token = request.cookies.get("access_token")
+    if not token and credentials:
+        token = credentials.credentials
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings.auth.secret_key.get_secret_value(),
+            algorithms=[settings.auth.algorithm]
+        )
+        if payload.get("type") != "access":
+            raise jwt.PyJWTError
+        return {
+            "username": payload.get("sub"),
+            "user_id": payload.get("user_id"),
+            "role": payload.get("role"),
+            "org_id": payload.get("org_id"),
+        }
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+def require_role(required_role: str):
+    """Dependency to check user role."""
+    async def role_checker(current_user: Dict = Depends(get_current_user)):
+        if current_user["role"] != required_role and current_user["role"] != "admin":
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return current_user
+    return role_checker
+
+# =============================================================================
+# API Routes
 # =============================================================================
 
 @router.post("/register", response_model=UserResponse)
@@ -338,46 +381,6 @@ async def get_me(current_user: Dict = Depends(get_current_user)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
-
-# =============================================================================
-# Dependency for token validation (used by other routes)
-# =============================================================================
-
-async def get_current_user(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Dict[str, Any]:
-    """Validate access token from cookie (fallback to Bearer) and return user info."""
-    token = request.cookies.get("access_token")
-    if not token and credentials:
-        token = credentials.credentials
-        
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-        
-    try:
-        payload = jwt.decode(
-            token,
-            settings.auth.secret_key.get_secret_value(),
-            algorithms=[settings.auth.algorithm]
-        )
-        if payload.get("type") != "access":
-            raise jwt.PyJWTError
-        return {
-            "username": payload.get("sub"),
-            "user_id": payload.get("user_id"),
-            "role": payload.get("role"),
-            "org_id": payload.get("org_id"),
-        }
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-def require_role(required_role: str):
-    """Dependency to check user role."""
-    async def role_checker(current_user: Dict = Depends(get_current_user)):
-        if current_user["role"] != required_role and current_user["role"] != "admin":
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-        return current_user
-    return role_checker
 
 # =============================================================================
 # Placeholder email functions (implement with your email service)

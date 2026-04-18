@@ -278,6 +278,10 @@ def _ray_engine():
         _ray_engine._inst = RayDistributedEngine()
     return _ray_engine._inst
 
+def _threat_consumer():
+    from orchestrator.threat_consumer import get_threat_consumer
+    return get_threat_consumer()
+
 
 # ---------------------------------------------------------------------------
 # Request / Response models
@@ -297,6 +301,10 @@ class AnalyzeRequest(BaseModel):
     source_ip: str = "0.0.0.0"
     dest_ip: str = "0.0.0.0"
     protocol: str = "tcp"
+
+class DecisionFeedbackRequest(BaseModel):
+    effective: bool = Field(..., description="Whether the response action was effective")
+    notes: Optional[str] = Field(None, description="Additional notes about decision effectiveness")
     timestamp: Optional[float] = None
     modality_scores: Dict[str, float] = Field(default_factory=dict)
 
@@ -1268,3 +1276,74 @@ async def stats(_auth: Dict = Depends(require_permission("read"))) -> Dict[str, 
         "distributed":       _ray_engine().get_stats(),
         "tracing":           _tracer().get_stats(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Threat Consumer / Decision Feedback (Phase 3: ML Integration)
+# ---------------------------------------------------------------------------
+
+@router.post("/decision/{decision_id}/feedback")
+async def record_decision_feedback(
+    decision_id: str,
+    request: DecisionFeedbackRequest,
+    _auth: Dict = Depends(require_permission("write")),
+) -> Dict[str, Any]:
+    """
+    Record feedback on decision effectiveness from API / SOC analyst.
+    Used to train bandit algorithm and improve response actions.
+    """
+    try:
+        _threat_consumer().record_feedback(
+            decision_id=decision_id,
+            effective=request.effective,
+            notes=request.notes or "",
+        )
+        return {
+            "status": "recorded",
+            "decision_id": decision_id,
+            "effective": request.effective,
+        }
+    except Exception as exc:
+        logger.error("Failed to record decision feedback: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/threat-consumer/stats")
+async def threat_consumer_stats(_auth: Dict = Depends(require_permission("read"))) -> Dict[str, Any]:
+    """
+    Get real-time threat consumer statistics.
+    Shows threat processing rate and decision engine metrics.
+    """
+    try:
+        stats = _threat_consumer().get_stats()
+        return {
+            "status": "active",
+            "stats": stats,
+        }
+    except Exception as exc:
+        logger.error("Failed to get threat consumer stats: %s", exc)
+        return {
+            "status": "error",
+            "error": str(exc),
+        }
+
+
+@router.get("/threat-consumer/decision-history")
+async def decision_history(
+    limit: int = 100,
+    _auth: Dict = Depends(require_permission("read")),
+) -> Dict[str, Any]:
+    """
+    Get recent decision history from threat consumer.
+    Useful for auditing and understanding decision patterns.
+    """
+    try:
+        history = _threat_consumer().decision_engine.get_history(limit=limit)
+        return {
+            "count": len(history),
+            "limit": limit,
+            "decisions": history,
+        }
+    except Exception as exc:
+        logger.error("Failed to get decision history: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))

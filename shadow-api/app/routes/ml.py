@@ -305,7 +305,7 @@ async def analyze_packet(
 
 @router.get("/status")
 @limiter.limit("10/minute")
-async def ml_status(user = Depends(get_current_user)) -> Dict[str, Any]:
+async def ml_status(request: Request, user = Depends(get_current_user)) -> Dict[str, Any]:
     """Get ML service status."""
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
@@ -331,7 +331,7 @@ async def ml_status(user = Depends(get_current_user)) -> Dict[str, Any]:
 
 @router.get("/models", response_model=List[ModelInfo])
 @limiter.limit("10/minute")
-async def get_models(user = Depends(get_current_user)) -> List[ModelInfo]:
+async def get_models(request: Request, user = Depends(get_current_user)) -> List[ModelInfo]:
     """Get list of active ML models (from ML service)."""
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:

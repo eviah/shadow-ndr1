@@ -1313,7 +1313,7 @@ mod tests {
 
     #[test]
     fn test_gate_address() {
-        let addr = InformationAddress::new(GATE_ADDRESS_START + 5);
+        let addr = InformationAddress::new(GATE_ADDRESS_START + 5).expect("Valid address");
         assert_eq!(addr.asset_type(), "Gate");
         assert_eq!(addr.describe(), "Gate 6");
     }

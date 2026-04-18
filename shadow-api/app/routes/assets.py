@@ -13,7 +13,7 @@ from typing import Optional, List, Dict, Any
 from enum import Enum
 
 import httpx
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, status, Request
 from loguru import logger
 from prometheus_client import Histogram, Counter
 from slowapi import Limiter
@@ -292,6 +292,7 @@ async def get_assets(
 @router.get("/{ip}")
 @limiter.limit("60/minute")
 async def get_asset(
+    request: Request,
     ip: str,
     include_history: bool = Query(False, description="Include risk history (time series)"),
     user = Depends(get_current_user),
@@ -379,6 +380,7 @@ async def get_asset(
 @router.get("/{ip}/risk-history")
 @limiter.limit("60/minute")
 async def get_asset_risk_history(
+    request: Request,
     ip: str,
     hours: int = Query(24, ge=1, le=168),
     user = Depends(get_current_user),

@@ -13,6 +13,7 @@ ONNX/TensorRT/Triton Hardware Acceleration | NLP Query Engine | SOC Dashboard
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 import time
@@ -72,12 +73,32 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         logger.warning("Metrics init failed (non-fatal): %s", exc)
 
+    # Start threat consumer (reads from Kafka shadow.threats topic)
+    try:
+        from orchestrator.threat_consumer import get_threat_consumer
+        threat_consumer = get_threat_consumer()
+        logger.info("🚀 Starting real-time threat consumer...")
+        # Start consumer in background task
+        asyncio.create_task(threat_consumer.start())
+        logger.info("✅ Threat consumer task created")
+    except Exception as exc:
+        logger.warning("Threat consumer init failed (non-fatal): %s", exc)
+
     logger.info("SHADOW-ML v10.0 — ONLINE | All systems operational")
     logger.info("=" * 70)
 
     yield
 
     logger.info("SHADOW-ML shutting down gracefully...")
+
+    # Shutdown threat consumer
+    try:
+        from orchestrator.threat_consumer import get_threat_consumer
+        consumer = get_threat_consumer()
+        consumer.shutdown()
+        logger.info("✅ Threat consumer shutdown complete")
+    except Exception as exc:
+        logger.warning("Threat consumer shutdown failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------

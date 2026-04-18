@@ -171,11 +171,13 @@ struct RawPacket {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
-    use tracing_subscriber::filter::EnvFilter;
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("shadow_sensor=info"));
+    let env_filter = if std::env::var("RUST_LOG").is_err() {
+        "shadow_sensor=info"
+    } else {
+        ""
+    };
     tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
+        .with_env_filter(tracing_subscriber::EnvFilter::new(env_filter))
         .init();
 
     let args = Args::parse();
