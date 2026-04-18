@@ -36,9 +36,13 @@ pub struct AdsbFrame {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AdsbMessage {
+    NoPositionInfo(NoPositionInfoMsg),
+    AircraftIdentification(AircraftIdentMsg),
     AirbornePosition(AirbornePositionMsg),
     AirborneVelocity(AirborneVelocityMsg),
-    AircraftIdentification(AircraftIdentMsg),
+    AircraftStatus(AircraftStatusMsg),
+    TargetStateAndStatus(TargetStateStatusMsg),
+    OperationalStatus(OperationalStatusMsg),
     Unknown { type_code: u8, raw: u64 },
 }
 
@@ -71,6 +75,42 @@ pub struct AircraftIdentMsg {
     pub type_code: u8,
     pub category: u8,
     pub callsign: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NoPositionInfoMsg {
+    pub type_code: u8,
+    pub surveillance_status: u8,
+    pub nic_supplemental: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AircraftStatusMsg {
+    pub type_code: u8,
+    pub subtype: u8,
+    pub emergency_state: u8,
+    pub mode_a_code: u16,
+    pub ident: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetStateStatusMsg {
+    pub type_code: u8,
+    pub subtype: u8,
+    pub selected_altitude_ft: Option<i32>,
+    pub barometric_altitude_ft: Option<i32>,
+    pub target_heading_degrees: Option<f64>,
+    pub vertical_rate_fpm: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationalStatusMsg {
+    pub type_code: u8,
+    pub subtype: u8,
+    pub cc_acas: u8,
+    pub cc_adsb_version: u8,
+    pub cc_track_angle_heading: u8,
+    pub cc_vertical_rate: u8,
 }
 
 /// Stateful CPR Position Decoder
@@ -199,9 +239,13 @@ fn parse_adsb_bits(input: (&[u8], usize)) -> IResult<(&[u8], usize), AdsbFrame> 
     let (input, type_code): (_, u8) = take(5usize)(input)?;
     
     let (input, message) = match type_code {
+        0 => parse_no_position_info(input, type_code)?,
         1..=4 => parse_aircraft_ident(input, type_code)?,
         9..=18 => parse_airborne_position(input, type_code)?,
         19 => parse_airborne_velocity(input, type_code)?,
+        28 => parse_aircraft_status(input, type_code)?,
+        29 => parse_target_state_status(input, type_code)?,
+        31 => parse_operational_status(input, type_code)?,
         _ => {
             let (input, raw_payload) = take(51usize)(input)?;
             (input, AdsbMessage::Unknown { type_code, raw: raw_payload })
@@ -334,6 +378,123 @@ fn parse_airborne_velocity(input: (&[u8], usize), type_code: u8) -> IResult<(&[u
             heading_degrees,
             vrate_tag,
             vrate_fpm,
+        })
+    ))
+}
+
+fn parse_no_position_info(input: (&[u8], usize), type_code: u8) -> IResult<(&[u8], usize), AdsbMessage> {
+    let (input, surveillance_status): (_, u8) = take(2usize)(input)?;
+    let (input, nic_supplemental): (_, u8) = take(1usize)(input)?;
+    let (input, _reserved): (_, u8) = take(48usize)(input)?;
+
+    Ok((
+        input,
+        AdsbMessage::NoPositionInfo(NoPositionInfoMsg {
+            type_code,
+            surveillance_status,
+            nic_supplemental,
+        })
+    ))
+}
+
+fn parse_aircraft_status(input: (&[u8], usize), type_code: u8) -> IResult<(&[u8], usize), AdsbMessage> {
+    let (input, subtype): (_, u8) = take(3usize)(input)?;
+    let (input, _reserved1): (_, u8) = take(5usize)(input)?;
+    let (input, emergency_state): (_, u8) = take(3usize)(input)?;
+    let (input, mode_a_code): (_, u16) = take(13usize)(input)?;
+    let (input, ident): (_, u8) = take(1usize)(input)?;
+    let (input, _reserved2): (_, u8) = take(31usize)(input)?;
+
+    Ok((
+        input,
+        AdsbMessage::AircraftStatus(AircraftStatusMsg {
+            type_code,
+            subtype,
+            emergency_state,
+            mode_a_code,
+            ident,
+        })
+    ))
+}
+
+fn parse_target_state_status(input: (&[u8], usize), type_code: u8) -> IResult<(&[u8], usize), AdsbMessage> {
+    let (input, subtype): (_, u8) = take(3usize)(input)?;
+    let (input, saf): (_, u8) = take(1usize)(input)?;
+    let (input, mcp_fcu_mode): (_, u8) = take(1usize)(input)?;
+
+    let (input, selected_altitude_ft) = if saf == 1 {
+        let (i, alt): (_, u16) = take(11usize)(input)?;
+        let alt_ft = ((alt as i32) << 5) & 0x7FFF_FFF0; // Gillham code conversion
+        (i, Some(alt_ft))
+    } else {
+        (input, None)
+    };
+
+    let (input, barometric_altitude_ft) = if mcp_fcu_mode == 1 {
+        let (i, alt): (_, u16) = take(11usize)(input)?;
+        let alt_ft = ((alt as i32) << 5) & 0x7FFF_FFF0;
+        (i, Some(alt_ft))
+    } else {
+        (input, None)
+    };
+
+    let (input, target_heading_degrees) = {
+        let (i, tah): (_, u8) = take(1usize)(input)?;
+        if tah == 1 {
+            let (i, heading): (_, u16) = take(9usize)(i)?;
+            let deg = heading as f64 * 360.0 / 512.0;
+            (i, Some(deg))
+        } else {
+            let (i, _): (_, u8) = take(9usize)(input)?;
+            (i, None)
+        }
+    };
+
+    let (input, vertical_rate_fpm) = {
+        let (i, vrate_src): (_, u8) = take(1usize)(input)?;
+        if vrate_src == 1 {
+            let (i, vrate): (_, u16) = take(9usize)(i)?;
+            let fpm = if vrate == 0 { 0 } else { (vrate as i32 - 1) * 100 };
+            (i, Some(fpm))
+        } else {
+            let (i, _): (_, u8) = take(9usize)(input)?;
+            (i, None)
+        }
+    };
+
+    let (input, _reserved): (_, u8) = take(6usize)(input)?;
+
+    Ok((
+        input,
+        AdsbMessage::TargetStateAndStatus(TargetStateStatusMsg {
+            type_code,
+            subtype,
+            selected_altitude_ft,
+            barometric_altitude_ft,
+            target_heading_degrees,
+            vertical_rate_fpm,
+        })
+    ))
+}
+
+fn parse_operational_status(input: (&[u8], usize), type_code: u8) -> IResult<(&[u8], usize), AdsbMessage> {
+    let (input, subtype): (_, u8) = take(3usize)(input)?;
+    let (input, _reserved1): (_, u8) = take(2usize)(input)?;
+    let (input, cc_acas): (_, u8) = take(1usize)(input)?;
+    let (input, cc_adsb_version): (_, u8) = take(3usize)(input)?;
+    let (input, cc_track_angle_heading): (_, u8) = take(1usize)(input)?;
+    let (input, cc_vertical_rate): (_, u8) = take(1usize)(input)?;
+    let (input, _reserved2): (_, u8) = take(39usize)(input)?;
+
+    Ok((
+        input,
+        AdsbMessage::OperationalStatus(OperationalStatusMsg {
+            type_code,
+            subtype,
+            cc_acas,
+            cc_adsb_version,
+            cc_track_angle_heading,
+            cc_vertical_rate,
         })
     ))
 }

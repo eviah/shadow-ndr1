@@ -83,6 +83,12 @@ pub mod baseline_scorer;
 pub mod mesh_consensus;
 #[cfg(feature = "correlation")]
 pub mod threat_correlation;
+#[cfg(feature = "modulation")]
+pub mod modulation;
+#[cfg(feature = "external_validation")]
+pub mod external_validation;
+#[cfg(feature = "deduplicator")]
+pub mod deduplicator;
 
 // =============================================================================
 // Common infrastructure (always present)
@@ -176,6 +182,12 @@ pub mod prelude {
     pub use crate::mesh_consensus::{MeshConsensus, SensorReport, ConsensusSolution};
     #[cfg(feature = "correlation")]
     pub use crate::threat_correlation::{ThreatCorrelator, ThreatEvent, ThreatEventType, CorrelationCluster};
+    #[cfg(feature = "modulation")]
+    pub use crate::modulation::{ModulationSample, ModulationQuality, analyze_modulation};
+    #[cfg(feature = "external_validation")]
+    pub use crate::external_validation::{ExternalValidator, ExternalAircraftState, PositionDiscrepancy, CallsignMatch};
+    #[cfg(feature = "deduplicator")]
+    pub use crate::deduplicator::{PacketDeduplicator, DeduplicationStats};
 }
 
 // =============================================================================
