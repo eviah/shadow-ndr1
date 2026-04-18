@@ -12,11 +12,12 @@ $ErrorActionPreference = "Continue"
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # Colors
-$GREEN = [ConsoleColor]::Green
-$RED = [ConsoleColor]::Red
-$YELLOW = [ConsoleColor]::Yellow
-$CYAN = [ConsoleColor]::Cyan
-$GRAY = [ConsoleColor]::Gray
+$GREEN = "Green"
+$RED = "Red"
+$YELLOW = "Yellow"
+$CYAN = "Cyan"
+$GRAY = "Gray"
+$WHITE = "White"
 
 # ============================================================================
 # HELPER FUNCTIONS
