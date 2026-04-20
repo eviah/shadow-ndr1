@@ -33,3 +33,15 @@ Thumbs.db
 *.bak
 *.txt
 *.out
+
+# Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+# audit logs
+shadow-ml/logs/
+shadow-ml/models/*.pkl
+shadow-ml/models/*.pt
+shadow-ml/models/*.onnx

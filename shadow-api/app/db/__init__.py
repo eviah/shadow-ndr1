@@ -14,8 +14,8 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 import asyncpg
 import redis.asyncio as redis
-import asynch
-from asynch.errors import Error as ClickHouseError
+from clickhouse_driver import Client as ClickHouseClient
+from clickhouse_driver.errors import Error as ClickHouseError
 from loguru import logger
 from prometheus_client import Counter, Gauge, Histogram
 from tenacity import (
@@ -117,7 +117,7 @@ class Database:
     def __init__(self):
         self.pg_pool: Optional[asyncpg.Pool] = None
         self.redis_client: Optional[redis.Redis] = None
-        self.clickhouse_client: Optional[asynch.pool.Pool] = None
+        self.clickhouse_client: Optional[ClickHouseClient] = None
         self._pg_adaptive: Optional[AdaptivePool] = None
         self._redis_adaptive: Optional[AdaptivePool] = None
         self._metrics_task: Optional[asyncio.Task] = None
@@ -167,18 +167,15 @@ class Database:
 
         # ClickHouse
         try:
-            self.clickhouse_client = await asynch.create_pool(
+            self.clickhouse_client = ClickHouseClient(
                 host=settings.clickhouse.host,
                 port=9000,
                 database=settings.clickhouse.database,
                 user=settings.clickhouse.user,
                 password=settings.clickhouse.password.get_secret_value(),
-                minsize=1,
-                maxsize=settings.clickhouse.pool_size,
             )
-            async with self.clickhouse_client.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    await cursor.execute("SELECT 1")
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self.clickhouse_client.execute, "SELECT 1")
             logger.info("✅ Connected to ClickHouse")
             db_connections_active.labels(type="clickhouse").inc()
             db_connections_total.labels(type="clickhouse").inc()
@@ -324,12 +321,10 @@ class Database:
             raise RuntimeError("ClickHouse not connected")
         start = time.time()
         try:
-            async with self.clickhouse_client.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    await cursor.execute(query, args=params)
-                    result = await cursor.fetchall()
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, self.clickhouse_client.execute, query, params)
             db_query_duration.labels(db_type="clickhouse", operation="execute").observe(time.time() - start)
-            return result
+            return result if result else []
         except Exception as e:
             db_errors_total.labels(db_type="clickhouse", error_type="execute").inc()
             raise
@@ -362,9 +357,9 @@ class Database:
 
         # ClickHouse
         try:
-            async with self.clickhouse_client.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    await cursor.execute("SELECT 1")
+            if self.clickhouse_client:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, self.clickhouse_client.execute, "SELECT 1")
             status["clickhouse"] = "ok"
         except Exception as e:
             status["clickhouse"] = str(e)
@@ -402,8 +397,8 @@ class Database:
         if self.redis_client:
             await self.redis_client.close()
         if self.clickhouse_client:
-            self.clickhouse_client.close()
-            await self.clickhouse_client.wait_closed()
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self.clickhouse_client.disconnect)
         self._initialized = False
         logger.info("Database connections closed")
 

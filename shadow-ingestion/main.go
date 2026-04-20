@@ -1295,41 +1295,38 @@ func main() {
 
 	consumer.Start() // שימוש ב-Start במקום Consume
 
+	// Keep the main goroutine alive until a signal is received
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	
+	sig := <-sigChan
+	log.Info().Str("signal", sig.String()).Msg("Shutdown initiated")
+	cancel()
+	flushTicker.Stop()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.Processor.ShutdownTimeout)
+	defer shutdownCancel()
+
+	if err := ps.Flush(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("Final flush failed")
+	}
+
+	done := make(chan struct{})
 	go func() {
-		sig := <-sigChan
-		log.Info().Str("signal", sig.String()).Msg("Shutdown initiated")
-		cancel()
-		flushTicker.Stop()
-
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.Processor.ShutdownTimeout)
-		defer shutdownCancel()
-
-		if err := ps.Flush(shutdownCtx); err != nil {
-			log.Error().Err(err).Msg("Final flush failed")
-		}
-
-		done := make(chan struct{})
-		go func() {
-			ps.wg.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-			log.Info().Msg("All data flushed")
-		case <-shutdownCtx.Done():
-			log.Warn().Msg("Shutdown timeout: data may be lost")
-		}
-
-		httpShutdownCtx, httpCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer httpCancel()
-		_ = srv.Shutdown(httpShutdownCtx)
-
-		close(ps.flushCh)
-		log.Info().Msg("Service stopped")
-		os.Exit(0)
+		ps.wg.Wait()
+		close(done)
 	}()
+	select {
+	case <-done:
+		log.Info().Msg("All data flushed")
+	case <-shutdownCtx.Done():
+		log.Warn().Msg("Shutdown timeout: data may be lost")
+	}
 
-	log.Info().Str("topic", cfg.Kafka.Topic).Strs("brokers", cfg.Kafka.Brokers).Msg("Kafka consumer started")
+	httpShutdownCtx, httpCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer httpCancel()
+	_ = srv.Shutdown(httpShutdownCtx)
+
+	close(ps.flushCh)
+	log.Info().Msg("Service stopped")
 }

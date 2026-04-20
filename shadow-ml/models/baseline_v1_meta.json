@@ -1,0 +1,39 @@
+{
+  "version": "baseline_v1",
+  "trained_at": 1776511990.3893535,
+  "classes": [
+    "benign",
+    "ddos",
+    "lateral_movement",
+    "exfiltration",
+    "c2_beacon",
+    "credential_stuffing",
+    "insider_exfil",
+    "supply_chain",
+    "adsb_spoof",
+    "gps_jamming",
+    "mode_s_hijack",
+    "acars_fuzz",
+    "modbus_attack",
+    "ils_tamper"
+  ],
+  "feature_names": [
+    "volumetric",
+    "lateral_movement",
+    "exfiltration",
+    "c2_beacon",
+    "credential_attack",
+    "insider",
+    "supply_chain",
+    "aviation_anomaly"
+  ],
+  "auc_threat": 1.0,
+  "brier_threat": 0.000409627256882315,
+  "accuracy_multiclass": 0.8101190476190476,
+  "precision_binary": 0.9993593850096092,
+  "recall_binary": 1.0,
+  "f1_binary": 0.99967958987504,
+  "samples_per_class": 600,
+  "noise_std": 0.1,
+  "train_time_sec": 113.7567675113678
+}

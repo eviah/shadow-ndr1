@@ -1,6 +1,6 @@
 kafka:
   brokers:
-    - "localhost:9092"
+    - "kafka:9092"
   topic: "shadow.raw"
   dlq_topic: "shadow.dlq"
   group_id: "shadow-ingestion"
@@ -8,27 +8,27 @@ kafka:
   retry_base_delay: "200ms"
 
 clickhouse:
-  host: "localhost"
+  host: "clickhouse"
   port: 9000
   database: "shadow_ndr"
   user: "default"
-  password: ""
+  password: "e5ac7f1c490a72f6c52c0fb5f5c34157d86ae2d01b8cb826"
 
 postgres:
-  host: "localhost"
+  host: "postgres"
   port: 5432
   database: "shadow_ndr"
   user: "shadow"
-  password: "shadow123"
+  password: "aPxZ74iYUA4-QRcMW_LFutNUpYnqwUZ1"
 
 redis:
-  host: "localhost"
+  host: "redis"
   port: 6379
-  password: ""
+  password: "_vQtmQCw62IvmitjFcSRHG4OFLuXXFpA"
   db: 0
 
 ml:
-  url: "http://localhost:8001"
+  url: "http://shadow-ml:8001"
   timeout: "2s"
   cache_ttl: "30s"
   explain_threshold: 0.75

@@ -24,12 +24,112 @@ Methods:
 from __future__ import annotations
 
 import math
+import os
 import time
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("shadow.aviation.kinematic")
+
+
+# ---------------------------------------------------------------------------
+# Optional trained LSTM trajectory anomaly scorer
+# ---------------------------------------------------------------------------
+
+class _TrajectoryLSTMScorer:
+    """
+    Lazy-loaded PyTorch LSTM autoencoder that scores 20-frame trajectory
+    windows. Returns per-window reconstruction MSE. Compares against the
+    99th-percentile threshold stored at training time.
+
+    Disabled silently if torch/model file missing. Gated by env
+    SHADOW_USE_TRAJECTORY_LSTM=1.
+    """
+
+    FEAT_DIM = 5
+    SEQ_LEN = 20
+    MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "trajectory_lstm_v1.pt"
+
+    def __init__(self) -> None:
+        self._model = None
+        self._mu = None
+        self._sd = None
+        self._threshold = 0.0
+        self._enabled = os.getenv("SHADOW_USE_TRAJECTORY_LSTM", "0") == "1"
+        if self._enabled:
+            self._try_load()
+
+    def _try_load(self) -> None:
+        try:
+            import torch
+            import torch.nn as nn
+            import numpy as np
+            if not self.MODEL_PATH.exists():
+                logger.info("trajectory_lstm: model not found at %s — disabled", self.MODEL_PATH)
+                self._enabled = False
+                return
+
+            class _Net(nn.Module):
+                def __init__(self, feat: int, hidden: int, latent: int):
+                    super().__init__()
+                    self.encoder = nn.LSTM(feat, hidden, batch_first=True)
+                    self.latent = nn.Linear(hidden, latent)
+                    self.unlatent = nn.Linear(latent, hidden)
+                    self.decoder = nn.LSTM(hidden, hidden, batch_first=True)
+                    self.head = nn.Linear(hidden, feat)
+
+                def forward(self, x):
+                    _, (h, _) = self.encoder(x)
+                    z = self.latent(h.squeeze(0))
+                    h2 = self.unlatent(z).unsqueeze(0)
+                    seq = torch.zeros(x.size(0), x.size(1), h2.size(-1), device=x.device)
+                    out, _ = self.decoder(seq, (h2, torch.zeros_like(h2)))
+                    return self.head(out)
+
+            bundle = torch.load(self.MODEL_PATH, map_location="cpu", weights_only=False)
+            arch = bundle["arch"]
+            net = _Net(arch["feat"], arch["hidden"], arch["latent"])
+            net.load_state_dict(bundle["model_state"])
+            net.eval()
+            self._model = net
+            self._torch = torch
+            self._np = np
+            self._mu = np.asarray(bundle["stats"]["mu"], dtype=np.float32)
+            self._sd = np.asarray(bundle["stats"]["sd"], dtype=np.float32)
+            self._threshold = float(bundle.get("threshold_99", 0.0052))
+            logger.info("trajectory_lstm: loaded (threshold_99=%.4f)", self._threshold)
+        except Exception as exc:
+            logger.warning("trajectory_lstm: load failed (%s) — disabled", exc)
+            self._enabled = False
+            self._model = None
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled and self._model is not None
+
+    def score(self, window: List[List[float]]) -> Tuple[float, float]:
+        """
+        Score a window of length SEQ_LEN with features [lat,lon,alt,speed,heading].
+        Returns (mse, threshold). If disabled, returns (0.0, 0.0).
+        """
+        if not self.enabled or len(window) != self.SEQ_LEN:
+            return 0.0, self._threshold
+        try:
+            arr = self._np.asarray(window, dtype=self._np.float32)
+            arr = (arr - self._mu) / self._sd
+            x = self._torch.from_numpy(arr).unsqueeze(0)
+            with self._torch.no_grad():
+                out = self._model(x)
+            mse = float(((out - x) ** 2).mean().item())
+            return mse, self._threshold
+        except Exception as exc:
+            logger.debug("trajectory_lstm: scoring failed (%s)", exc)
+            return 0.0, self._threshold
+
+
+_TRAJECTORY_SCORER = _TrajectoryLSTMScorer()
 
 # ---------------------------------------------------------------------------
 # Physical constants
@@ -326,6 +426,25 @@ class KinematicValidator:
                                  f"Kalman innovation {innovation:.0f}m (position inconsistency)")
             violations.append(v)
 
+        # --- Check 8: Trained LSTM trajectory autoencoder (optional) ---
+        if _TRAJECTORY_SCORER.enabled:
+            hist = self._history.get(frame.icao24, [])
+            if len(hist) >= _TrajectoryLSTMScorer.SEQ_LEN - 1:
+                window = hist[-(_TrajectoryLSTMScorer.SEQ_LEN - 1):] + [frame]
+                # Position-invariant features: lat/lon are deltas from the
+                # first frame in the window (matches how the model was trained).
+                lat0, lon0 = window[0].lat, window[0].lon
+                feats = [[f.lat - lat0, f.lon - lon0, f.altitude_ft, f.speed_kt, f.heading_deg]
+                         for f in window]
+                mse, thr = _TRAJECTORY_SCORER.score(feats)
+                if thr > 0 and mse > thr:
+                    score = min(1.0, (mse / thr - 1.0) / 19.0 + 0.35)
+                    v = PhysicsViolation(
+                        "trajectory_lstm", mse, thr, score,
+                        f"LSTM recon MSE {mse:.4f} > p99 {thr:.4f} (learned anomaly)"
+                    )
+                    violations.append(v)
+
         # --- Aggregate score ---
         spoof_score = 0.0
         for v in violations:
@@ -377,6 +496,7 @@ class KinematicValidator:
             "legit": len(results) - spoofed - suspicious,
             "avg_spoof_score": round(sum(r.spoof_score for r in results) / len(results), 4),
             "tracked_aircraft": len(self._history),
+            "trajectory_lstm_enabled": _TRAJECTORY_SCORER.enabled,
         }
 
     # ── Private ─────────────────────────────────────────────────────────────

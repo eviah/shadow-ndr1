@@ -154,9 +154,9 @@ app.post('/api/sensor/data', sensorRateLimiter, async (req, res) => {
     console.log('[DEBUG] Headers:', JSON.stringify(req.headers, null, 2));
     console.log('[DEBUG] Body:', JSON.stringify(req.body, null, 2));
     console.log('[DEBUG] ════════════════════════════════════════════════════');
-    
+
     logger.info({ body: JSON.stringify(req.body).substring(0, 500) }, 'Received sensor data');
-    
+
     // 1. Authentication (optional if SENSOR_JWT_SECRET set)
     let sensorTenantId = null;
     const sensorJwtSecret = process.env.SENSOR_JWT_SECRET;
@@ -261,10 +261,10 @@ app.post('/api/sensor/data', sensorRateLimiter, async (req, res) => {
     // 8. Also create alert if high severity
     if (severity === 'critical' || severity === 'high') {
       const alertResult = await db.query(
-    `INSERT INTO alerts (tenant_id, threat_id, title, message, severity, created_at)
+        `INSERT INTO alerts (tenant_id, threat_id, title, message, severity, created_at)
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [tenantId, newThreat.id, `Threat: ${protocol}`, description, severity, new Date()]
-);
+        [tenantId, newThreat.id, `Threat: ${protocol}`, description, severity, new Date()]
+      );
       io.to(`tenant:${tenantId}`).emit('new_alert', alertResult.rows[0]);
     }
 
@@ -314,12 +314,30 @@ app.use(errorHandler);
 // ========== 6. Kafka consumer (improved error handling) ==========
 async function startKafka() {
   if (!config.KAFKA_BROKERS) return;
-  const { Kafka } = await import('kafkajs');
+  const { Kafka, logLevel } = await import('kafkajs');
   const kafka = new Kafka({
     clientId: 'shadow-mt',
     brokers: config.KAFKA_BROKERS.split(','),
-    retry: { retries: 3 },
+    retry: { retries: 8, initialRetryTime: 500, maxRetryTime: 30000 },
+    logLevel: logLevel.WARN,
   });
+
+  // Pre-create topic so the consumer doesn't race on metadata fetch
+  const admin = kafka.admin();
+  await admin.connect();
+  try {
+    const existing = await admin.listTopics();
+    if (!existing.includes(config.KAFKA_TOPIC_THREATS)) {
+      await admin.createTopics({
+        waitForLeaders: true,
+        topics: [{ topic: config.KAFKA_TOPIC_THREATS, numPartitions: 1, replicationFactor: 1 }],
+      });
+      logger.info({ topic: config.KAFKA_TOPIC_THREATS }, 'Kafka topic created');
+    }
+  } finally {
+    await admin.disconnect();
+  }
+
   const consumer = kafka.consumer({ groupId: config.KAFKA_GROUP_ID || 'shadow-mt-group' });
   await consumer.connect();
   await consumer.subscribe({ topic: config.KAFKA_TOPIC_THREATS, fromBeginning: false });

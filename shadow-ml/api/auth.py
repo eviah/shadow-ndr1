@@ -15,11 +15,12 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from typing import Any, Dict, List, Optional, Set
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = logging.getLogger("shadow.api.auth")
@@ -30,12 +31,33 @@ def _ph(pw: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration (loaded from env / secret vault; fails closed)
 # ---------------------------------------------------------------------------
 
-JWT_SECRET = "shadow-ml-jwt-master-secret-change-in-production"  # load from secrets in prod
-JWT_EXPIRY_HOURS = 6
+
+def _load_jwt_secret() -> str:
+    val = os.environ.get("SHADOW_ML_JWT_SECRET", "").strip()
+    if val:
+        return val
+    # fall back to in-process vault (ephemeral, rotates per process)
+    try:
+        from core.secrets import get_secret
+        v = get_secret("JWT_SECRET")
+        if v:
+            return v
+    except Exception:
+        pass
+    # Last resort: generate ephemeral — WARN LOUDLY.
+    import secrets as _s
+    ephemeral = _s.token_hex(32)
+    logger.warning("SHADOW_ML_JWT_SECRET not set; using ephemeral secret (tokens invalidated on restart)")
+    return ephemeral
+
+
+JWT_SECRET = _load_jwt_secret()
+JWT_EXPIRY_HOURS = int(os.environ.get("SHADOW_ML_JWT_EXPIRY_HOURS", "6"))
 ALGORITHM = "HS256"
+JWT_ISSUER = "shadow-ml"
 
 ROLES = {
     "admin":    ["read", "write", "delete", "manage", "debug"],
@@ -44,12 +66,50 @@ ROLES = {
     "service":  ["read", "write", "internal"],
 }
 
-# Hardcoded service accounts (replace with DB lookup in production)
-SERVICE_ACCOUNTS: Dict[str, Dict[str, str]] = {
-    "admin":   {"password_hash": _ph("shadow-admin-2024!"),   "role": "admin"},
-    "analyst": {"password_hash": _ph("shadow-analyst-2024!"), "role": "analyst"},
-    "svc":     {"password_hash": _ph("shadow-svc-token"),      "role": "service"},
-}
+# Service accounts. Passwords are ONLY used for /auth/login; preferred auth
+# for machine-to-machine is X-API-Key (sha256-hashed, loaded from env).
+def _load_service_accounts() -> Dict[str, Dict[str, str]]:
+    # Admin password can be overridden via env; otherwise ephemeral strong one.
+    import secrets as _s
+    env_admin = os.environ.get("SHADOW_ML_ADMIN_PASSWORD", "").strip()
+    admin_pw = env_admin or _s.token_urlsafe(24)
+    if not env_admin:
+        logger.warning("SHADOW_ML_ADMIN_PASSWORD not set; using ephemeral admin password: %s", admin_pw)
+    env_analyst = os.environ.get("SHADOW_ML_ANALYST_PASSWORD", "").strip() or _s.token_urlsafe(24)
+    return {
+        "admin":   {"password_hash": _ph(admin_pw),     "role": "admin"},
+        "analyst": {"password_hash": _ph(env_analyst),  "role": "analyst"},
+    }
+
+
+SERVICE_ACCOUNTS: Dict[str, Dict[str, str]] = _load_service_accounts()
+
+
+# ---------------------------------------------------------------------------
+# API key support: env contains comma-separated sha256 hex digests.
+# Caller sends plaintext in X-API-Key; we sha256 and compare in constant time.
+# ---------------------------------------------------------------------------
+
+def _load_api_key_hashes() -> Set[str]:
+    raw = os.environ.get("SHADOW_ML_API_KEYS", "").strip()
+    if not raw:
+        return set()
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
+API_KEY_HASHES: Set[str] = _load_api_key_hashes()
+
+
+def verify_api_key(plaintext: str) -> bool:
+    if not plaintext or not API_KEY_HASHES:
+        return False
+    digest = hashlib.sha256(plaintext.encode()).hexdigest().lower()
+    # constant-time any-match
+    match = False
+    for h in API_KEY_HASHES:
+        if hmac.compare_digest(digest, h):
+            match = True
+    return match
 
 # ---------------------------------------------------------------------------
 # Token operations
@@ -164,6 +224,32 @@ async def verify_token(
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     logger.debug("Auth OK: user=%s role=%s", payload.get("sub"), payload.get("role"))
     return payload
+
+
+def verify_auth_header(request: Request) -> Optional[Dict[str, Any]]:
+    """
+    Combined verifier used by ASGI-level auth middleware.
+    Accepts either:
+      - Authorization: Bearer <jwt>
+      - X-API-Key: <plaintext>
+    Returns payload dict on success, None on failure.
+    Never raises.
+    """
+    # X-API-Key fast path
+    api_key = request.headers.get("x-api-key", "").strip()
+    if api_key and verify_api_key(api_key):
+        return {"sub": "api-key", "role": "service", "permissions": ROLES["service"]}
+
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return None
+    token = auth.split(None, 1)[1].strip()
+    if is_revoked(token):
+        return None
+    try:
+        return decode_token(token)
+    except ValueError:
+        return None
 
 
 def require_permission(permission: str):

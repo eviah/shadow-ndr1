@@ -1,0 +1,49 @@
+{
+  "version": "trajectory_lstm_v1",
+  "trained_at": 1776513556.3281765,
+  "device": "cpu",
+  "epochs": 20,
+  "batch": 64,
+  "train_samples": 6000,
+  "val_samples": 600,
+  "threshold_99": 0.006806111428886652,
+  "auc_anomaly": 1.0,
+  "per_attack": {
+    "alt_jump": {
+      "mean_err": 0.9028212428092957,
+      "p50_err": 0.8327598571777344,
+      "p95_err": 1.7436574697494507,
+      "detection_rate": 1.0,
+      "false_positive_rate": null
+    },
+    "teleport": {
+      "mean_err": 1106.4423828125,
+      "p50_err": 933.108642578125,
+      "p95_err": 2524.51708984375,
+      "detection_rate": 1.0,
+      "false_positive_rate": null
+    },
+    "heading_flip": {
+      "mean_err": 0.9326580762863159,
+      "p50_err": 0.7615370154380798,
+      "p95_err": 1.858322262763977,
+      "detection_rate": 1.0,
+      "false_positive_rate": null
+    },
+    "gps_drift": {
+      "mean_err": 154.4269256591797,
+      "p50_err": 84.59403991699219,
+      "p95_err": 500.0848693847656,
+      "detection_rate": 1.0,
+      "false_positive_rate": null
+    },
+    "normal": {
+      "mean_err": 0.0034490490797907114,
+      "p50_err": 0.0033033634535968304,
+      "p95_err": 0.00583572406321764,
+      "detection_rate": null,
+      "false_positive_rate": 0.016666666666666666
+    }
+  },
+  "train_time_sec": 114.80745124816895
+}

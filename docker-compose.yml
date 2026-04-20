@@ -3,27 +3,35 @@ services:
     image: postgres:15-alpine
     container_name: shadow-postgres
     environment:
-      POSTGRES_DB: shadow_ndr
-      POSTGRES_USER: shadow
-      POSTGRES_PASSWORD: shadow-prod-2026
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - shadow-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U shadow -d shadow_ndr"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest-alpine
     container_name: shadow-clickhouse
+    environment:
+      CLICKHOUSE_DB: ${POSTGRES_DB}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     ports:
-      - "8123:8123"
-      - "9000:9000"
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9000:9000"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
     networks:
@@ -32,25 +40,40 @@ services:
       nofile:
         soft: 262144
         hard: 262144
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --header='X-ClickHouse-User: ${CLICKHOUSE_USER:-default}' --header='X-ClickHouse-Key: ${CLICKHOUSE_PASSWORD}' http://127.0.0.1:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     container_name: shadow-redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--protected-mode", "yes"]
     ports:
-      - "6380:6379"
+      - "127.0.0.1:6380:6379"
     networks:
       - shadow-network
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
 
   kafka:
     image: apache/kafka:latest
     container_name: shadow-kafka
+    ports:
+      - "127.0.0.1:9093:9093"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9094
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9094
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,EXTERNAL://0.0.0.0:9093,CONTROLLER://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -61,52 +84,86 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_NUM_PARTITIONS: 1
       KAFKA_HEAP_OPTS: "-Xmx256M -Xms128M"
-    ports:
-      - "9093:9092"
     networks:
       - shadow-network
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
   shadow-api:
     build: ./shadow-api
     container_name: shadow-api
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
-      - DATABASE_URL=postgresql://shadow:shadow-prod-2026@postgres:5432/shadow_ndr
-      - REDIS_URL=redis://redis:6379
+      - SHADOW_DATABASE__HOST=postgres
+      - SHADOW_DATABASE__PORT=5432
+      - SHADOW_DATABASE__USER=${POSTGRES_USER}
+      - SHADOW_DATABASE__PASSWORD=${POSTGRES_PASSWORD}
+      - SHADOW_DATABASE__DATABASE=${POSTGRES_DB}
+      - SHADOW_REDIS__HOST=redis
+      - SHADOW_REDIS__PORT=6379
+      - SHADOW_REDIS__PASSWORD=${REDIS_PASSWORD}
+      - SHADOW_REDIS__DB=0
       - KAFKA_BROKERS=kafka:9092
       - CLICKHOUSE_HOST=clickhouse
+      - SHADOW_CLICKHOUSE__HOST=clickhouse
+      - SHADOW_CLICKHOUSE__PORT=9000
+      - SHADOW_CLICKHOUSE__DATABASE=${POSTGRES_DB}
+      - SHADOW_CLICKHOUSE__USER=${CLICKHOUSE_USER:-default}
+      - SHADOW_CLICKHOUSE__PASSWORD=${CLICKHOUSE_PASSWORD}
       - ML_API_URL=http://shadow-ml:8001
-      - SECRET_KEY=shadow-prod-investor-demo-2026
+      - SECRET_KEY=${SHADOW_API_SECRET_KEY}
+      - JWT_SECRET=${SHADOW_API_JWT_SECRET}
+      - SHADOW_ENV=${SHADOW_ENV:-production}
     volumes:
-      - ./shadow-api:/app
       - api_models:/app/models
     depends_on:
       postgres:
         condition: service_healthy
       clickhouse:
-        condition: service_started
+        condition: service_healthy
       kafka:
         condition: service_started
       redis:
         condition: service_started
     networks:
       - shadow-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   shadow-ml:
     build: ./shadow-ml
     container_name: shadow-ml
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     environment:
-      - DATABASE_URL=postgresql://shadow:shadow-prod-2026@postgres:5432/shadow_ndr
-      - REDIS_URL=redis://redis:6379
+      - SHADOW_DATABASE__HOST=postgres
+      - SHADOW_DATABASE__PORT=5432
+      - SHADOW_DATABASE__USER=${POSTGRES_USER}
+      - SHADOW_DATABASE__PASSWORD=${POSTGRES_PASSWORD}
+      - SHADOW_DATABASE__DATABASE=${POSTGRES_DB}
+      - SHADOW_REDIS__HOST=redis
+      - SHADOW_REDIS__PORT=6379
+      - SHADOW_REDIS__PASSWORD=${REDIS_PASSWORD}
+      - SHADOW_REDIS__DB=0
       - KAFKA_BROKERS=kafka:9092
+      - SHADOW_ML_JWT_SECRET=${SHADOW_ML_JWT_SECRET}
+      - SHADOW_ML_API_KEYS=${SHADOW_ML_API_KEYS}
+      - SHADOW_ML_CORS_ORIGINS=${SHADOW_ML_CORS_ORIGINS}
+      - SHADOW_ML_TRUSTED_HOSTS=${SHADOW_ML_TRUSTED_HOSTS}
+      - SHADOW_ENV=${SHADOW_ENV:-production}
+      - SHADOW_DISABLE_DOCS=${SHADOW_DISABLE_DOCS:-1}
+      - SHADOW_USE_REAL_MODEL=${SHADOW_USE_REAL_MODEL:-1}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - SHADOW_ALERT_WEBHOOK_URL=${SHADOW_ALERT_WEBHOOK_URL:-}
+      - SHADOW_LOG_DIR=/app/logs
     volumes:
-      - ./shadow-ml:/app
       - ml_models:/app/models
+      - ml_logs:/app/logs
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,13 +171,23 @@ services:
         condition: service_started
     networks:
       - shadow-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; urllib.request.urlopen('http://localhost:8001/health', timeout=3); sys.exit(0)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   shadow-ui:
-    build: ./multi-tenant/frontend
+    build: ./shadow-ui
     container_name: shadow-ui
     ports:
-      - "3000:80"
+      - "127.0.0.1:3000:80"
     depends_on:
       - shadow-api
     networks:
@@ -137,14 +204,17 @@ services:
       - SHADOW_KAFKA_GROUP_ID=shadow-ingestion
       - SHADOW_CLICKHOUSE_HOST=clickhouse
       - SHADOW_CLICKHOUSE_PORT=9000
-      - SHADOW_CLICKHOUSE_DATABASE=shadow_ndr
+      - SHADOW_CLICKHOUSE_DATABASE=${POSTGRES_DB}
+      - SHADOW_CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - SHADOW_CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
       - SHADOW_POSTGRES_HOST=postgres
       - SHADOW_POSTGRES_PORT=5432
-      - SHADOW_POSTGRES_DATABASE=shadow_ndr
-      - SHADOW_POSTGRES_USER=shadow
-      - SHADOW_POSTGRES_PASSWORD=shadow-prod-2026
+      - SHADOW_POSTGRES_DATABASE=${POSTGRES_DB}
+      - SHADOW_POSTGRES_USER=${POSTGRES_USER}
+      - SHADOW_POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - SHADOW_REDIS_HOST=redis
       - SHADOW_REDIS_PORT=6379
+      - SHADOW_REDIS_PASSWORD=${REDIS_PASSWORD}
       - SHADOW_ML_URL=http://shadow-ml:8001
       - SHADOW_PROCESSOR_WORKER_COUNT=4
       - SHADOW_PROCESSOR_BATCH_SIZE=200
@@ -152,13 +222,13 @@ services:
       - SHADOW_ALERTING_CRITICAL_THRESHOLD=0.85
       - SHADOW_METRICS_PORT=9090
       - SHADOW_LOG_LEVEL=info
-      - SHADOW_ENVIRONMENT=production
+      - SHADOW_ENVIRONMENT=${SHADOW_ENV:-production}
       - TZ=UTC
     volumes:
       - ./shadow-ingestion/config.yaml:/app/config.yaml:ro
     ports:
-      - "8080:8080"
-      - "9090:9090"
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9099:9090"
     depends_on:
       - kafka
       - clickhouse
@@ -167,6 +237,10 @@ services:
       - shadow-ml
     networks:
       - shadow-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   sensor:
@@ -180,16 +254,20 @@ services:
       kafka:
         condition: service_started
     ports:
-      - "9999:9999/udp"
+      - "127.0.0.1:9999:9999/udp"
     networks:
       - shadow-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:latest
     container_name: shadow-prometheus
     ports:
-      - "9091:9090"
+      - "127.0.0.1:9095:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -199,22 +277,30 @@ services:
       - '--storage.tsdb.retention.time=30d'
     networks:
       - shadow-network
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
   grafana:
     image: grafana/grafana:latest
     container_name: shadow-grafana
     ports:
-      - "3002:3000"
+      - "127.0.0.1:3002:3000"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: shadow-investor-2026
-      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD}
+      GF_SECURITY_ADMIN_USER: ${GF_ADMIN_USER}
       GF_INSTALL_PLUGINS: grafana-piechart-panel
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_STRICT_TRANSPORT_SECURITY: "true"
     volumes:
       - ./monitoring/grafana-provisioning:/etc/grafana/provisioning:ro
       - grafana_data:/var/lib/grafana
     networks:
       - shadow-network
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
 networks:
@@ -226,5 +312,6 @@ volumes:
   clickhouse_data:
   api_models:
   ml_models:
+  ml_logs:
   prometheus_data:
   grafana_data:

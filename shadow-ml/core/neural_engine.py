@@ -18,6 +18,7 @@ Architecture Map (200 layers total):
 from __future__ import annotations
 
 import math
+import os
 import time
 import logging
 from dataclasses import dataclass, field
@@ -892,6 +893,31 @@ class ShadowNeuralEngine:
             except Exception as exc:
                 logger.warning("PyTorch turbo-mode unavailable: %s", exc)
 
+        # Optional trained baseline (sklearn Pipeline). Activated by env flag.
+        # When present, its class probabilities are overlaid onto attack_classes
+        # and its "is-threat" probability raises the floor of threat_score.
+        self._baseline = None
+        self._baseline_classes: List[str] = []
+        self._baseline_features: List[str] = []
+        if os.environ.get("SHADOW_USE_REAL_MODEL", "1") == "1":
+            try:
+                import joblib
+                pkl_path = os.environ.get(
+                    "SHADOW_BASELINE_PATH",
+                    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "baseline_v1.pkl"),
+                )
+                if os.path.exists(pkl_path):
+                    bundle = joblib.load(pkl_path)
+                    self._baseline = bundle["pipeline"]
+                    self._baseline_classes = list(bundle.get("classes", []))
+                    self._baseline_features = list(bundle.get("feature_names", []))
+                    logger.info("Baseline model loaded: %s  classes=%d  features=%d",
+                                pkl_path, len(self._baseline_classes), len(self._baseline_features))
+                else:
+                    logger.info("Baseline model not found at %s (run scripts/train_baseline.py)", pkl_path)
+            except Exception as exc:
+                logger.warning("Baseline load failed: %s", exc)
+
         # Adversarial defense: query-history tracker for optimization-attack detection
         # key = tuple(round(f,1) for f in features[:8]) → list of recent scores
         self._query_history: Dict[str, List[float]] = {}
@@ -1081,6 +1107,17 @@ class ShadowNeuralEngine:
 
     # ------------------------------------------------------------------
 
+    def _baseline_feature_vector(self, tv: ThreatVector) -> List[float]:
+        """Extract the 8-dim feature vector the baseline GBDT was trained on."""
+        ms = tv.modality_scores or {}
+        names = self._baseline_features or [
+            "volumetric", "lateral_movement", "exfiltration", "c2_beacon",
+            "credential_attack", "insider", "supply_chain", "aviation_anomaly",
+        ]
+        return [float(ms.get(n, 0.0)) for n in names]
+
+    # ------------------------------------------------------------------
+
     def process(self, tv: ThreatVector) -> NeuralOutput:
         t0 = time.perf_counter()
 
@@ -1102,13 +1139,31 @@ class ShadowNeuralEngine:
             fp = ",".join(f"{x:.1f}" for x in raw_feats[:16])
             opt_penalty = self._detect_optimization_attack(fp, smooth_score)
 
+            # ── Trained baseline overlay (sklearn GBDT) ─────────────────────
+            # Produces calibrated per-class probabilities from modality_scores.
+            baseline_classes_pred: Dict[str, float] = {}
+            baseline_threat_p: float = 0.0
+            if self._baseline is not None:
+                try:
+                    feat = self._baseline_feature_vector(tv)
+                    proba = self._baseline.predict_proba([feat])[0]
+                    baseline_classes_pred = {
+                        c: float(p) for c, p in zip(self._baseline_classes, proba)
+                    }
+                    # "threat" = anything not named 'benign'
+                    baseline_threat_p = float(sum(
+                        p for c, p in baseline_classes_pred.items() if c != "benign"
+                    ))
+                except Exception as exc:
+                    logger.debug("Baseline inference skipped: %s", exc)
+
             # ── FINAL THREAT SCORE ─────────────────────────────────────────
             # Take the MAXIMUM of:
             #   1. Randomized smooth pipeline score  (deep representation)
             #   2. Raw structural floor              (mathematically robust)
+            #   3. Trained baseline p(threat)        (calibrated classifier)
             # Then ADD the optimization-attack penalty.
-            # An attacker cannot reduce the MAX below BOTH components simultaneously.
-            threat_score = max(smooth_score, raw_floor) + opt_penalty
+            threat_score = max(smooth_score, raw_floor, baseline_threat_p) + opt_penalty
             threat_score = min(1.0, threat_score)
 
             # ── Full pipeline for rich output metadata ─────────────────────
@@ -1127,6 +1182,13 @@ class ShadowNeuralEngine:
             # Override level with hardened score
             level = self._stage9._threat_level(threat_score)
             defenses = DEFENSE_PLAYBOOK.get(level, ["monitor"])
+
+            # Overlay baseline classifier predictions (only keep classes with
+            # meaningful probability; never silently drop existing keys)
+            if baseline_classes_pred:
+                for cls, p in baseline_classes_pred.items():
+                    if p >= 0.05:
+                        attack_classes[f"baseline:{cls}"] = p
 
             elapsed_ms = (time.perf_counter() - t0) * 1000
 
