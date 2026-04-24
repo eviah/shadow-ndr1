@@ -78,7 +78,7 @@ func (p *PostgresClient) createTables(ctx context.Context) error {
 			created_at TIMESTAMPTZ DEFAULT now()
 		)`,
 
-		// Main packets table - Aviation only (no railway fields)
+		// Main packets table - Aviation
 		`CREATE TABLE IF NOT EXISTS packets (
 			id BIGSERIAL PRIMARY KEY,
 			timestamp TIMESTAMPTZ NOT NULL,

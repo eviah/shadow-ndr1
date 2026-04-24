@@ -2,7 +2,7 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════╗
 ║  Shadow NDR – Ultimate AI Configuration                                  ║
-║  The most powerful configuration system for railway cybersecurity        ║
+║  The most powerful configuration system for aviation cybersecurity       ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -281,7 +281,7 @@ class Settings(BaseSettings):
         extra="ignore",
         json_schema_extra={
             "title": "Shadow NDR Configuration",
-            "description": "The most advanced configuration system for railway cybersecurity",
+            "description": "The most advanced configuration system for aviation cybersecurity",
         },
     )
 

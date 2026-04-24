@@ -1,23 +1,39 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import io from 'socket.io-client';
+
+/**
+ * WebSocket hook — exposes:
+ *   status        connect state
+ *   events        rolling event log (bounded to 100)
+ *   send(evt,d)   emit to server
+ *   on(evt, cb)   subscribe to a server event; returns unsubscribe fn
+ *   socket        raw socket.io instance for advanced use
+ *
+ * Server emits we care about:
+ *   threat:new         a fresh active threat (first detection)
+ *   threat:update      an existing active threat extended (dedupe hit)
+ *   threat:resolved    sweeper auto-closed an attack
+ *   asset:position     simulator position update
+ *   asset:threat_level asset threat_level transitioned
+ *   new_threat         legacy alias for threat:new (kept for back-compat)
+ *   new_alert          high-severity alert creation
+ */
+const MIRRORED_EVENTS = [
+    'new_threat', 'new_alert',
+    'threat:new', 'threat:update', 'threat:resolved',
+    'asset:position', 'asset:threat_level',
+];
 
 export const useWebSocket = () => {
     const [status, setStatus] = useState('disconnected');
     const [events, setEvents] = useState([]);
     const socketRef = useRef(null);
+    const listenersRef = useRef(new Map()); // event → Set<cb>
 
     useEffect(() => {
-        // קח את הטוקן מה-localStorage
         const token = localStorage.getItem('accessToken');
-        
-        if (!token) {
-            console.log('[WS] No token found, skipping connection');
-            return;
-        }
+        if (!token) return;
 
-        console.log('[WS] Connecting with token:', token.substring(0, 50) + '...');
-
-        // התחבר ל-Socket.IO
         const socket = io('http://localhost:3001', {
             auth: { token },
             transports: ['websocket', 'polling'],
@@ -28,73 +44,38 @@ export const useWebSocket = () => {
             timeout: 20000,
         });
 
-        // אירועי חיבור
-        socket.on('connect', () => {
-            console.log('[WS] ✅ Connected to server');
-            setStatus('connected');
-        });
+        socket.on('connect',        () => setStatus('connected'));
+        socket.on('disconnect',     () => setStatus('disconnected'));
+        socket.on('connect_error',  () => setStatus('error'));
 
-        socket.on('disconnect', (reason) => {
-            console.log('[WS] ❌ Disconnected:', reason);
-            setStatus('disconnected');
-        });
-
-        socket.on('connect_error', (error) => {
-            console.error('[WS] Connection error:', error.message);
-            setStatus('error');
-        });
-
-        socket.on('connected', (data) => {
-            console.log('[WS] Server confirmation:', data);
-        });
-
-        // אירועי נתונים
-        socket.on('new_threat', (threat) => {
-            console.log('[WS] 🚨 New threat:', threat);
-            setEvents(prev => [{ 
-                event: 'new_threat', 
-                data: threat, 
-                timestamp: Date.now() 
-            }, ...prev].slice(0, 100));
-        });
-
-        socket.on('new_alert', (alert) => {
-            console.log('[WS] 🔔 New alert:', alert);
-            setEvents(prev => [{ 
-                event: 'new_alert', 
-                data: alert, 
-                timestamp: Date.now() 
-            }, ...prev].slice(0, 100));
-        });
-
-        socket.on('threatsCount', (data) => {
-            console.log('[WS] 📊 Threats count:', data);
-        });
-
-        socket.on('error', (error) => {
-            console.error('[WS] Server error:', error);
-        });
+        // Mirror every interesting event into the rolling log AND fan out to
+        // any .on() subscribers registered via this hook.
+        for (const evt of MIRRORED_EVENTS) {
+            socket.on(evt, (data) => {
+                // Keep the log small; position updates are high-frequency so
+                // we skip them in the log but still dispatch to listeners.
+                if (evt !== 'asset:position') {
+                    setEvents(prev => [{ event: evt, data, timestamp: Date.now() }, ...prev].slice(0, 100));
+                }
+                const subs = listenersRef.current.get(evt);
+                if (subs) for (const cb of subs) { try { cb(data); } catch (e) { console.error(e); } }
+            });
+        }
 
         socketRef.current = socket;
-
-        // ניקוי בהרס הקומפוננטה
-        return () => {
-            console.log('[WS] Cleaning up connection');
-            if (socketRef.current) {
-                socketRef.current.disconnect();
-                socketRef.current = null;
-            }
-        };
+        return () => { socket.disconnect(); socketRef.current = null; };
     }, []);
 
-    // פונקציה לשליחת הודעות
-    const send = (event, data) => {
-        if (socketRef.current && status === 'connected') {
-            socketRef.current.emit(event, data);
-        } else {
-            console.warn(`[WS] Cannot send ${event}, not connected`);
-        }
-    };
+    const send = useCallback((event, data) => {
+        if (socketRef.current?.connected) socketRef.current.emit(event, data);
+    }, []);
 
-    return { status, events, send };
+    const on = useCallback((event, cb) => {
+        let set = listenersRef.current.get(event);
+        if (!set) { set = new Set(); listenersRef.current.set(event, set); }
+        set.add(cb);
+        return () => set.delete(cb);
+    }, []);
+
+    return { status, events, send, on, socket: socketRef };
 };

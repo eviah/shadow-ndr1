@@ -25,54 +25,57 @@ class Severity(str, Enum):
     INFO = "info"
 
 class AssetType(str, Enum):
-    """Type of network asset."""
-    TRAIN = "train"
-    SIGNALING = "signaling"
-    SWITCH = "switch"
-    POWER = "power"
-    UNKNOWN = "unknown"
+    """Type of aviation network asset."""
+    AIRCRAFT = "aircraft"
+    AIRPORT  = "airport"
+    ATC      = "atc"            # air-traffic-control ground station
+    RADAR    = "radar"
+    UAV      = "uav"
+    GROUND   = "ground"         # airline ground IT / maintenance
+    SWITCH   = "switch"
+    UNKNOWN  = "unknown"
 
 class Protocol(str, Enum):
-    """Network protocol identifiers."""
-    TCP = "tcp"
-    UDP = "udp"
-    ICMP = "icmp"
-    IEC104 = "iec104"
-    MODBUS = "modbus"
-    DNP3 = "dnp3"
-    MVB = "mvb"
-    TRDP = "trdp"
-    ETCS = "etcs"
-    CAN = "can"
-    PROFINET = "profinet"
-    UNKNOWN = "unknown"
+    """Network protocol identifiers (aviation + IT)."""
+    TCP        = "tcp"
+    UDP        = "udp"
+    ICMP       = "icmp"
+    ADS_B      = "ads_b"
+    MODE_S     = "mode_s"
+    ACARS      = "acars"
+    SATCOM     = "satcom"
+    GDL90      = "gdl90"
+    AFDX       = "afdx"
+    ARINC429   = "arinc429"
+    ARINC664   = "arinc664"
+    DATALINK   = "datalink"
+    MQTT       = "mqtt"
+    UNKNOWN    = "unknown"
 
 class AttackType(str, Enum):
-    """Known attack types (subset from the main system)."""
-    SYN_FLOOD = "SYN_FLOOD"
-    UDP_FLOOD = "UDP_FLOOD"
-    ICMP_FLOOD = "ICMP_FLOOD"
-    HTTP_FLOOD = "HTTP_FLOOD"
-    PORT_SCAN = "PORT_SCAN"
-    BRUTE_FORCE = "BRUTE_FORCE"
-    SSH_BRUTE = "SSH_BRUTE"
-    DATA_EXFIL = "DATA_EXFIL"
-    BEACONING = "BEACONING"
-    DNS_TUNNEL = "DNS_TUNNEL"
-    C2_COMMUNICATION = "C2_COMMUNICATION"
-    RANSOMWARE_SPREAD = "RANSOMWARE_SPREAD"
-    MVB_FLOOD = "MVB_FLOOD"
-    CAN_BUS_ATTACK = "CAN_BUS_ATTACK"
-    PROFINET_DOS = "PROFINET_DOS"
-    TRDP_MANIPULATION = "TRDP_MANIPULATION"
-    ETCS_SPOOFING = "ETCS_SPOOFING"
-    TRAIN_SABOTAGE = "TRAIN_SABOTAGE"
-    IEC104_MANIPULATION = "IEC104_MANIPULATION"
-    DNP3_DOS = "DNP3_DOS"
-    MODBUS_INJECTION = "MODBUS_INJECTION"
-    OPCUA_SCAN = "OPCUA_SCAN"
-    BACNET_ENUM = "BACNET_ENUM"
-    MQTT_FLOOD = "MQTT_FLOOD"
+    """Known attack types relevant to aviation NDR."""
+    SYN_FLOOD           = "SYN_FLOOD"
+    UDP_FLOOD           = "UDP_FLOOD"
+    ICMP_FLOOD          = "ICMP_FLOOD"
+    HTTP_FLOOD          = "HTTP_FLOOD"
+    PORT_SCAN           = "PORT_SCAN"
+    BRUTE_FORCE         = "BRUTE_FORCE"
+    SSH_BRUTE           = "SSH_BRUTE"
+    DATA_EXFIL          = "DATA_EXFIL"
+    BEACONING           = "BEACONING"
+    DNS_TUNNEL          = "DNS_TUNNEL"
+    C2_COMMUNICATION    = "C2_COMMUNICATION"
+    RANSOMWARE_SPREAD   = "RANSOMWARE_SPREAD"
+    ADS_B_SPOOFING      = "ADS_B_SPOOFING"
+    ADS_B_JAMMING       = "ADS_B_JAMMING"
+    MODE_S_REPLAY       = "MODE_S_REPLAY"
+    ACARS_INJECTION     = "ACARS_INJECTION"
+    GPS_SPOOFING        = "GPS_SPOOFING"
+    GPS_JAMMING         = "GPS_JAMMING"
+    SATCOM_HIJACK       = "SATCOM_HIJACK"
+    TCAS_MANIPULATION   = "TCAS_MANIPULATION"
+    AIRCRAFT_COMPROMISE = "AIRCRAFT_COMPROMISE"
+    MQTT_FLOOD          = "MQTT_FLOOD"
 
 # =============================================================================
 # Shared mixins
@@ -130,7 +133,7 @@ class PacketSchema(BaseModel):
     explanation: Optional[Dict[str, Any]] = Field(None, description="SHAP explanation (if available)")
 
     # Enrichment
-    train_id: Optional[str] = None
+    aircraft_id: Optional[str] = None          # ICAO24 hex / tail number
     asset_id: Optional[str] = None
     org_id: str = "default"
 
@@ -241,8 +244,9 @@ class AssetResponse(BaseModel):
 
     # Classification
     asset_type: AssetType = AssetType.UNKNOWN
-    is_train: bool = False
-    train_id: Optional[str] = None
+    is_aircraft: bool = False
+    icao24: Optional[str] = None               # 24-bit ICAO address (hex)
+    tail_number: Optional[str] = None
 
     # Timestamps
     first_seen: Optional[datetime] = None
@@ -262,12 +266,13 @@ class AssetResponse(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "ip": "192.168.1.10",
-            "hostname": "train-controller-01",
-            "os_guess": "Windows 10 IoT",
-            "open_ports": [502, 2404],
-            "asset_type": "train",
-            "is_train": True,
-            "train_id": "TRAIN-123",
+            "hostname": "b737-acars-01",
+            "os_guess": "VxWorks 6.9",
+            "open_ports": [5555, 8443],
+            "asset_type": "aircraft",
+            "is_aircraft": True,
+            "icao24": "738065",
+            "tail_number": "4X-EDB",
             "risk_score": 0.85,
             "vulnerabilities": [{"cve_id": "CVE-2021-34527", "cvss_score": 8.5}]
         }

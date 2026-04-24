@@ -23,21 +23,24 @@ export async function auditLog({ tenantId, userId, username, action, resource, r
             )
         `);
         
-        await db.query(
-            `INSERT INTO audit_log (tenant_id, user_id, username, action, resource, resource_id, details, ip_address, status)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [
-                tenantId || null,
-                userId || null,
-                username || null,
-                action,
-                resource || null,
-                resourceId || null,
-                details ? JSON.stringify(details) : null,
-                ip || null,
-                status
-            ]
-        );
+        const insertSql = `INSERT INTO audit_log (tenant_id, user_id, username, action, resource, resource_id, details, ip_address, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`;
+        const insertParams = [
+            tenantId || null,
+            userId || null,
+            username || null,
+            action,
+            resource || null,
+            resourceId || null,
+            details ? JSON.stringify(details) : null,
+            ip || null,
+            status
+        ];
+        if (tenantId) {
+            await db.tenantQuery(tenantId, insertSql, insertParams);
+        } else {
+            await db.query(insertSql, insertParams);
+        }
     } catch (err) {
         logger.warn({ err: err.message, action }, 'Audit log write failed');
     }

@@ -288,6 +288,13 @@ app.include_router(canary_router, prefix="")
 from api.routes import router as api_router  # noqa: E402
 app.include_router(api_router, prefix="")
 
+try:
+    from apex.routes import router as apex_router  # noqa: E402
+    app.include_router(apex_router, prefix="")
+    logger.info("APEX router loaded: /apex/proof, /apex/ghost, /apex/vault, /apex/swarm")
+except Exception as exc:
+    logger.warning("APEX router not loaded (non-fatal): %s", exc)
+
 
 # ---------------------------------------------------------------------------
 # Exception handlers

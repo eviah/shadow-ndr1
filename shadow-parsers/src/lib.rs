@@ -191,36 +191,35 @@ pub mod prelude {
 }
 
 // =============================================================================
-// Railway utilities (for backward compatibility, now adapted for aviation)
+// Aviation utilities
 // =============================================================================
 
-/// Utilities for interpreting IEC 104 frames in a railway context.
-/// This module is kept for compatibility with existing railway monitoring code,
-/// but also includes aviation‑specific helpers when needed.
+/// Utilities for interpreting IEC 104 frames in an aviation (ground-infra) context.
+/// Used for airport SCADA, radar perimeters, runway lighting, and ATC I/O.
 #[cfg(feature = "iec104")]
-pub mod railway {
+pub mod aviation {
     use crate::iec104::{Iec104Frame, InfoVal, CriticalityLevel};
 
-    /// Represents a train identifier (railway context).
+    /// Represents an aviation asset identifier derived from IEC104 common address.
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-    pub enum TrainId {
-        /// Mainline train.
-        Train(u16),
-        /// Shunting locomotive.
-        Shunt(u16),
-        /// Signal equipment.
-        Signal(u16),
+    pub enum AircraftId {
+        /// Aircraft (mainline / passenger).
+        Aircraft(u16),
+        /// Apron / ground vehicle.
+        Ground(u16),
+        /// ATC / radar / tower equipment.
+        Atc(u16),
         /// Unknown kind.
         Unknown(u16),
     }
 
-    impl std::fmt::Display for TrainId {
+    impl std::fmt::Display for AircraftId {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
-                TrainId::Train(id) => write!(f, "TRAIN-{}", id),
-                TrainId::Shunt(id) => write!(f, "SHUNT-{}", id),
-                TrainId::Signal(id) => write!(f, "SIGNAL-{}", id),
-                TrainId::Unknown(id) => write!(f, "UNKNOWN-{}", id),
+                AircraftId::Aircraft(id) => write!(f, "AIRCRAFT-{}", id),
+                AircraftId::Ground(id) => write!(f, "GROUND-{}", id),
+                AircraftId::Atc(id) => write!(f, "ATC-{}", id),
+                AircraftId::Unknown(id) => write!(f, "UNKNOWN-{}", id),
             }
         }
     }
@@ -231,7 +230,7 @@ pub mod railway {
     /// Check if a parsed IEC104 frame contains a safety‑critical command.
     pub fn is_safety_critical(frame: &Iec104Frame) -> bool {
         if let Some(asdu) = &frame.asdu {
-            // Railway‑specific emergency types (private range)
+            // Aviation ground‑infra emergency types (private range)
             if asdu.type_id == 105 || asdu.type_id == 120 {
                 return true;
             }
@@ -275,13 +274,13 @@ pub mod railway {
         false
     }
 
-    /// Get train identifier from common address (simplified mapping).
-    pub fn train_id_from_ca(ca: u16) -> TrainId {
+    /// Get aviation asset identifier from common address (simplified mapping).
+    pub fn aircraft_id_from_ca(ca: u16) -> AircraftId {
         match ca {
-            0x0001..=0x0010 => TrainId::Train(ca),
-            0x1000..=0x1010 => TrainId::Shunt(ca - 0x0FFF),
-            0x2001..=0x2010 => TrainId::Signal(ca - 0x2000),
-            _ => TrainId::Unknown(ca),
+            0x0001..=0x0010 => AircraftId::Aircraft(ca),
+            0x1000..=0x1010 => AircraftId::Ground(ca - 0x0FFF),
+            0x2001..=0x2010 => AircraftId::Atc(ca - 0x2000),
+            _ => AircraftId::Unknown(ca),
         }
     }
 
@@ -338,18 +337,18 @@ mod tests {
 
     #[cfg(feature = "iec104")]
     #[test]
-    fn test_railway_utils() {
+    fn test_aviation_utils() {
         use crate::iec104::*;
 
         let normal_frame = Iec104Frame {
             apci: Apci::S { recv: 0 },
             asdu: None,
         };
-        assert!(!railway::is_safety_critical(&normal_frame));
+        assert!(!aviation::is_safety_critical(&normal_frame));
 
-        match railway::train_id_from_ca(0x0001) {
-            railway::TrainId::Train(1) => (),
-            _ => panic!("wrong train id"),
+        match aviation::aircraft_id_from_ca(0x0001) {
+            aviation::AircraftId::Aircraft(1) => (),
+            _ => panic!("wrong aircraft id"),
         }
     }
 }

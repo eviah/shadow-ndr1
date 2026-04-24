@@ -2,7 +2,7 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════╗
 ║  Shadow NDR – Ultimate FastAPI Application                               ║
-║  Production‑grade, AI‑ready, high‑performance railway NDR API            ║
+║  Production‑grade, AI‑ready, high‑performance aviation NDR API           ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -161,8 +161,8 @@ async def lifespan(app: FastAPI):
 # FastAPI app
 # =============================================================================
 app = FastAPI(
-    title="Shadow NDR API",
-    description="Railway Network Detection & Response – AI‑powered security for rail infrastructure",
+    title="Shadow NDR – Aviation Cybersecurity API",
+    description="Aviation Network Detection & Response – AI-powered cyber defense for airlines, aircraft, and airports. Monitors ADS-B, ACARS, SATCOM, Mode-S and ground IT networks in real time.",
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",

@@ -20,10 +20,12 @@ import jwt from 'jsonwebtoken';
 import compression from 'compression';
 import { config } from './config/index.js';
 import { logger, httpLog } from './utils/logger.js';
-import { securityMiddleware, errorHandler, sensorRateLimiter } from './middleware/index.js';
+import { securityMiddleware, errorHandler, sensorRateLimiter, authRateLimiter, apiRateLimiter } from './middleware/index.js';
 import { db } from './services/database.js';
 import { redisService } from './services/redis.js';
 import ThreatScoring from './services/threatScoring.js';
+import { upsertActiveThreat, startSweeper } from './services/threatLifecycle.js';
+import * as simulator from './services/simulator.js';
 
 // Route imports
 import authRoutes from './routes/auth.js';
@@ -33,6 +35,7 @@ import threatsRoutes from './routes/threats.js';
 import alertsRoutes from './routes/alerts.js';
 import reportsRoutes from './routes/reports.js';
 import healthRoutes from './routes/health.js';
+import simulatorRoutes from './routes/simulator.js';
 
 const app = express();
 const server = createServer(app);
@@ -102,9 +105,9 @@ io.on('connection', (socket) => {
 
   socket.on('getThreats', async () => {
     try {
-      const result = await db.query(
-        `SELECT COUNT(*) FROM threats WHERE tenant_id = $1 AND status = 'active'`,
-        [tenantId]
+      const result = await db.tenantQuery(
+        tenantId,
+        `SELECT COUNT(*) FROM threats WHERE status = 'active'`
       );
       socket.emit('threatsCount', { count: parseInt(result.rows[0].count, 10) });
     } catch (err) {
@@ -130,13 +133,16 @@ app.use(compression());
 app.use(express.json({ limit: '2mb' }));
 app.use(httpLog);
 
-// API routes (existing)
-app.use('/api/auth', authRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/assets', assetsRoutes);
-app.use('/api/threats', threatsRoutes);
-app.use('/api/alerts', alertsRoutes);
-app.use('/api/reports', reportsRoutes);
+// API routes (with rate limiting)
+// Auth endpoints get a tighter brute-force guard.
+app.use('/api/auth',       authRateLimiter, authRoutes);
+// Everything else shares a generic per-IP rate limit.
+app.use('/api/dashboard',  apiRateLimiter, dashboardRoutes);
+app.use('/api/assets',     apiRateLimiter, assetsRoutes);
+app.use('/api/threats',    apiRateLimiter, threatsRoutes);
+app.use('/api/alerts',     apiRateLimiter, alertsRoutes);
+app.use('/api/reports',    apiRateLimiter, reportsRoutes);
+app.use('/api/simulator',  apiRateLimiter, simulatorRoutes);
 app.use('/health', healthRoutes);
 
 // ========== 3. SENSOR DATA INGESTION – ULTIMATE ==========
@@ -157,7 +163,11 @@ app.post('/api/sensor/data', sensorRateLimiter, async (req, res) => {
 
     logger.info({ body: JSON.stringify(req.body).substring(0, 500) }, 'Received sensor data');
 
-    // 1. Authentication (optional if SENSOR_JWT_SECRET set)
+    // 1. Authentication
+    //  - Production: SENSOR_JWT_SECRET is required and the sensor must carry a
+    //    bearer token whose `tenant_id` claim (integer) selects the tenant.
+    //  - Development: if SENSOR_JWT_SECRET is unset we fall back to tenant 1 and
+    //    emit a loud warning so nobody ships this config to prod.
     let sensorTenantId = null;
     const sensorJwtSecret = process.env.SENSOR_JWT_SECRET;
     if (sensorJwtSecret) {
@@ -168,7 +178,13 @@ app.post('/api/sensor/data', sensorRateLimiter, async (req, res) => {
       const token = authHeader.split(' ')[1];
       const decoded = jwt.verify(token, sensorJwtSecret);
       sensorTenantId = decoded.tenant_id;
-      if (!sensorTenantId) throw new Error('No tenant_id in sensor token');
+      if (!Number.isInteger(sensorTenantId)) {
+        return res.status(401).json({ error: 'Sensor token tenant_id must be an integer' });
+      }
+    } else if (config.NODE_ENV === 'production') {
+      return res.status(401).json({ error: 'SENSOR_JWT_SECRET not configured' });
+    } else {
+      logger.warn('SENSOR_JWT_SECRET unset — accepting unauthenticated sensor traffic into tenant 1 (dev only)');
     }
 
     // 2. Validate required fields
@@ -191,7 +207,7 @@ app.post('/api/sensor/data', sensorRateLimiter, async (req, res) => {
     }
 
     // 3. Determine tenant (from sensor token or default)
-    const tenantId = sensorTenantId || '11111111-1111-1111-1111-111111111111';
+    const tenantId = sensorTenantId || 1;
 
     // 4. Generate description
     let description = `${protocol.toUpperCase()} packet detected`;
@@ -235,33 +251,41 @@ app.post('/api/sensor/data', sensorRateLimiter, async (req, res) => {
       }
     }
 
-    // 6. Insert into database
-    const result = await db.query(
-      `INSERT INTO threats (
-        tenant_id, threat_type, severity, source_ip, description, score, detected_at, metadata, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [
+    // 6. Lifecycle-aware upsert (dedupes repeat attacks, emits WS events)
+    const icaoHint = details?.icao24 || req.body?.icao24 || null;
+    let assetId = null;
+    if (icaoHint) {
+      const a = await db.tenantQuery(
         tenantId,
-        protocol,
-        severity,
-        src_ip || null,
-        description,
-        score,
-        timestamp ? new Date(timestamp) : new Date(),
-        JSON.stringify({ flow_id, dst_ip, src_port, dst_port, details, raw: req.body }),
-        'active'
-      ]
-    );
+        `SELECT id FROM assets WHERE icao24 = $1 LIMIT 1`,
+        [icaoHint],
+      );
+      if (a.rows.length) assetId = a.rows[0].id;
+    }
 
-    const newThreat = result.rows[0];
+    const { threat: newThreat, created } = await upsertActiveThreat(tenantId, {
+      threat_type: protocol,
+      severity,
+      source_ip: src_ip || null,
+      dest_ip: dst_ip || null,
+      icao24: icaoHint,
+      asset_id: assetId,
+      score,
+      description,
+      raw_features: { flow_id, dst_ip, src_port, dst_port, details, raw: req.body },
+      mitre_technique: null,
+    });
 
-    // 7. Real-time broadcast
+    // 7. Real-time broadcast — distinguish new vs update so UI can animate
+    io.to(`tenant:${tenantId}`).emit(created ? 'threat:new' : 'threat:update', newThreat);
+    // Legacy event kept for existing UI listeners
     io.to(`tenant:${tenantId}`).emit('new_threat', newThreat);
 
-    // 8. Also create alert if high severity
-    if (severity === 'critical' || severity === 'high') {
-      const alertResult = await db.query(
-        `INSERT INTO alerts (tenant_id, threat_id, title, message, severity, created_at)
+    // 8. Create alert only for genuinely new high-severity threats (not repeats)
+    if (created && (severity === 'critical' || severity === 'high')) {
+      const alertResult = await db.tenantQuery(
+        tenantId,
+        `INSERT INTO alerts (tenant_id, threat_id, title, message, severity, detected_at)
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
         [tenantId, newThreat.id, `Threat: ${protocol}`, description, severity, new Date()]
       );
@@ -345,7 +369,12 @@ async function startKafka() {
     eachMessage: async ({ message }) => {
       try {
         const threat = JSON.parse(message.value.toString());
-        const { rows } = await db.query(
+        if (!Number.isInteger(threat.tenant_id)) {
+          logger.warn({ threat }, 'Kafka threat missing integer tenant_id — dropping');
+          return;
+        }
+        const { rows } = await db.tenantQuery(
+          threat.tenant_id,
           `INSERT INTO threats (tenant_id, asset_id, threat_type, severity, source_ip, icao24, score, description, detected_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
           [
@@ -430,6 +459,8 @@ process.on('unhandledRejection', (err) => {
         }
       });
     });
+    startSweeper(io);
+    await simulator.start(io);
     logger.info(
       { port: config.PORT, env: config.NODE_ENV, ws: true, sensor: true },
       '🚀 Shadow NDR MT APEX v3.1 LIVE – Sensor endpoint ready'

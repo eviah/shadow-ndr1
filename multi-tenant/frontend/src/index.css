@@ -2,55 +2,193 @@
 @tailwind components;
 @tailwind utilities;
 
-*, *::before, *::after { box-sizing:border-box; }
-html { scroll-behavior:smooth; }
+/* ─── Shadow NDR · Aviation NOC Terminal Theme ──────────────────────────────
+   Monochrome graphite palette, muted amber accent, industrial grid motif.
+   Inspired by Mission Control / ATC / Bloomberg terminal aesthetics.
+─────────────────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+
+:root {
+  --bg-0:   #0a0a0b;   /* page */
+  --bg-1:   #101012;   /* sections */
+  --bg-2:   #161618;   /* panels  */
+  --bg-3:   #1c1c20;   /* raised  */
+  --line-1: #27272a;   /* hairlines */
+  --line-2: #3f3f46;   /* emphasis */
+  --text-0: #e4e4e7;   /* primary */
+  --text-1: #a1a1aa;   /* secondary */
+  --text-2: #71717a;   /* muted  */
+  --text-3: #52525b;   /* disabled */
+  --accent: #d97706;   /* amber — used sparingly */
+  --accent-dim: rgba(217,119,6,.15);
+}
 
 body {
-  background: radial-gradient(ellipse 90% 70% at 50% -5%, #0a103a 0%, #030610 65%);
-  min-height:100vh;
-  font-family:'DM Sans',system-ui,sans-serif;
+  background-color: var(--bg-0);
+  background-image:
+    linear-gradient(rgba(255,255,255,.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.015) 1px, transparent 1px);
+  background-size: 48px 48px;
+  background-position: -1px -1px;
+  color: var(--text-0);
+  min-height: 100vh;
+  font-family: 'JetBrains Mono','Share Tech Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-feature-settings: 'zero','ss02';
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: .01em;
 }
 
-/* Scanlines */
-body::before {
-  content:''; position:fixed; inset:0; pointer-events:none; z-index:9999;
-  background: repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,217,247,.012) 2px,rgba(0,217,247,.012) 4px);
+/* Headings get a slight serifless display face */
+.font-display,
+h1, h2, h3, h4 {
+  font-family: 'Inter','DM Sans', system-ui, -apple-system, Segoe UI, sans-serif;
+  letter-spacing: -0.01em;
+  color: var(--text-0);
 }
 
-::-webkit-scrollbar { width:4px; height:4px; }
-::-webkit-scrollbar-track { background:#07091a; }
-::-webkit-scrollbar-thumb { background:#15203a; border-radius:4px; }
-::-webkit-scrollbar-thumb:hover { background:#00d9f733; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg-0); }
+::-webkit-scrollbar-thumb { background: var(--line-1); border-radius: 2px; border: 2px solid var(--bg-0); }
+::-webkit-scrollbar-thumb:hover { background: var(--line-2); }
+::selection { background: rgba(217,119,6,.35); color: #fff; }
 
+/* ─── Global Scanline Overlay ────────────────────────────────────────────── */
+.scanlines::before {
+  content: " ";
+  display: block;
+  position: absolute;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%),
+              linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+  z-index: 100;
+  background-size: 100% 4px, 3px 100%;
+  pointer-events: none;
+  opacity: 0.15;
+}
+
+/* ─── Panels ─────────────────────────────────────────────────────────────── */
 .panel {
-  background: linear-gradient(135deg,rgba(11,15,34,.97) 0%,rgba(7,9,26,.98) 100%);
-  border:1px solid rgba(21,32,58,.9);
-  border-radius:14px;
-  position:relative; overflow:hidden;
-  box-shadow: 0 4px 40px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.04);
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: 1px;
+  position: relative;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
 }
-.panel::before {
-  content:''; position:absolute; top:0; left:0; right:0; height:1px;
-  background:linear-gradient(90deg,transparent 0%,rgba(0,217,247,.45) 50%,transparent 100%);
+.panel::after {
+  content: '';
+  position: absolute; bottom: 0; right: 0; width: 4px; height: 4px;
+  border-right: 1px solid var(--line-2);
+  border-bottom: 1px solid var(--line-2);
+  opacity: 0.5;
 }
 
-.badge { font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; padding:2px 8px; border-radius:4px; }
-.badge-emergency { background:rgba(255,31,76,.25); color:#ff4569; border:1px solid rgba(255,31,76,.4); animation:pulse 1s infinite; }
-.badge-critical  { background:rgba(255,31,76,.15); color:#ff4569; border:1px solid rgba(255,31,76,.3); }
-.badge-high      { background:rgba(255,123,0,.15); color:#ff9c33; border:1px solid rgba(255,123,0,.3); }
-.badge-medium    { background:rgba(251,191,36,.12); color:#fbbf24; border:1px solid rgba(251,191,36,.25); }
-.badge-low       { background:rgba(0,232,122,.10); color:#00e87a; border:1px solid rgba(0,232,122,.2); }
-.badge-info      { background:rgba(0,217,247,.10); color:#00d9f7; border:1px solid rgba(0,217,247,.2); }
+/* ─── Typography overrides ───────────────────────────────────────────────── */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'JetBrains Mono', monospace !important;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+}
 
-.badge-safe         { background:rgba(0,232,122,.10);  color:#00e87a; border:1px solid rgba(0,232,122,.2); }
-.badge-elevated     { background:rgba(251,191,36,.12); color:#fbbf24; border:1px solid rgba(251,191,36,.25); }
-.badge-warning      { background:rgba(255,123,0,.15);  color:#ff9c33; border:1px solid rgba(255,123,0,.3); }
-.badge-under_attack { background:rgba(255,31,76,.25);  color:#ff4569; border:1px solid rgba(255,31,76,.4); animation:pulse 1s infinite; }
+/* ─── Interactive ────────────────────────────────────────────────────────── */
+button {
+  border-radius: 1px !important;
+}
+input, select, textarea {
+  border-radius: 1px !important;
+  font-family: 'JetBrains Mono', monospace !important;
+}
 
-.mono { font-family:'Share Tech Mono',monospace; }
-.font-display { font-family:'Syne',sans-serif; }
-.text-gradient { background:linear-gradient(135deg,#00d9f7,#8b5cf6); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+/* ─── Scrollbars (Industrial) ────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-0); }
+::-webkit-scrollbar-thumb { background: var(--line-1); border: 1px solid var(--line-2); }
+::-webkit-scrollbar-thumb:hover { background: var(--line-2); }
+.badge-emergency    { background: rgba(185,28,28,.14);  color: #ef4444; border-color: rgba(185,28,28,.5); }
+.badge-critical     { background: rgba(185,28,28,.10);  color: #ef4444; border-color: rgba(185,28,28,.4); }
+.badge-high         { background: rgba(217,119,6,.12);  color: #f59e0b; border-color: rgba(217,119,6,.4); }
+.badge-medium       { background: rgba(202,138,4,.10);  color: #eab308; border-color: rgba(202,138,4,.3); }
+.badge-low          { background: rgba(5,150,105,.10);  color: #10b981; border-color: rgba(5,150,105,.3); }
+.badge-info         { background: rgba(161,161,170,.10); color: #a1a1aa; border-color: rgba(161,161,170,.28); }
 
-/* Leaflet dark overrides */
-.leaflet-container { background:#07091a !important; }
-.leaflet-tile-pane { filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(1.1); }
+.badge-safe         { background: rgba(5,150,105,.10);  color: #10b981; border-color: rgba(5,150,105,.3); }
+.badge-elevated     { background: rgba(202,138,4,.10);  color: #eab308; border-color: rgba(202,138,4,.3); }
+.badge-warning      { background: rgba(217,119,6,.12);  color: #f59e0b; border-color: rgba(217,119,6,.4); }
+.badge-under_attack { background: rgba(185,28,28,.18);  color: #ef4444; border-color: rgba(185,28,28,.55); animation: pulse 1.3s ease-in-out infinite; }
+
+/* ─── Typography utilities ───────────────────────────────────────────────── */
+.mono { font-family: 'JetBrains Mono','Share Tech Mono', ui-monospace, monospace; }
+.text-gradient { color: var(--text-0); font-weight: 600; }
+
+/* ─── Leaflet ────────────────────────────────────────────────────────────── */
+.leaflet-container { background: var(--bg-0) !important; }
+.leaflet-tile-pane img[src*="openstreetmap"],
+.leaflet-tile-pane img[src*="tile.osm"] {
+  filter: invert(.92) hue-rotate(180deg) brightness(.9) contrast(.95) saturate(.25);
+}
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: var(--bg-2) !important;
+  color: var(--text-0) !important;
+  border: 1px solid var(--line-1) !important;
+  border-radius: 2px !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,.6) !important;
+}
+.leaflet-popup-content { margin: 10px 12px !important; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+.leaflet-container a.leaflet-popup-close-button { color: var(--text-2) !important; }
+
+/* ─── Animations ─────────────────────────────────────────────────────────── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .45; }
+}
+@keyframes sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+@keyframes haloPulse {
+  0%, 100% { transform: scale(1);   opacity: .25; }
+  50%      { transform: scale(1.3); opacity: .05; }
+}
+@keyframes blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: .3; }
+}
+
+/* ─── Tables: NOC data-grid ──────────────────────────────────────────────── */
+table { font-variant-numeric: tabular-nums; }
+table thead tr {
+  border-bottom: 1px solid var(--line-2);
+  background: linear-gradient(180deg, var(--bg-3), var(--bg-2));
+}
+table thead th {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px !important;
+  font-weight: 600;
+  color: var(--text-2) !important;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  padding: 8px 10px !important;
+}
+table tbody tr { border-bottom: 1px solid rgba(39,39,42,.55); }
+table tbody tr:hover { background: rgba(39,39,42,.4); }
+table tbody td { padding: 8px 10px !important; }
+
+/* ─── Buttons ────────────────────────────────────────────────────────────── */
+button {
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ─── Status dot ─────────────────────────────────────────────────────────── */
+.status-dot { display:inline-block; width:6px; height:6px; border-radius:50%; vertical-align:middle; }
+.status-dot.live { background:#10b981; box-shadow: 0 0 0 2px rgba(16,185,129,.2); animation: blink 1.8s infinite; }
+.status-dot.warn { background:#f59e0b; box-shadow: 0 0 0 2px rgba(245,158,11,.2); }
+.status-dot.down { background:#ef4444; box-shadow: 0 0 0 2px rgba(239,68,68,.2); }
+
+/* ─── Border utility overrides for amber accent ──────────────────────────── */
+.border-s-border { border-color: var(--line-1) !important; }
+.text-s-accent { color: var(--accent) !important; }
+.bg-s-accent   { background-color: var(--accent) !important; }

@@ -2,7 +2,7 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════╗
 ║  Shadow NDR – Ultimate Authentication Layer                              ║
-║  AI‑ready, multi‑tenant, production‑grade auth for railway security     ║
+║  AI‑ready, multi‑tenant, production‑grade auth for aviation security    ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
 

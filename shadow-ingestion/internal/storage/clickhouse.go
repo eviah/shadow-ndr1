@@ -53,7 +53,7 @@ func NewClickHouse(host string, port int, database, user, password string) (*Cli
 }
 
 func (c *ClickHouseClient) createTable(ctx context.Context) error {
-	// Extended schema with all aviation fields (no railway)
+	// Extended schema with all aviation fields
 	query := fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
 			timestamp DateTime64(3) CODEC(Delta, LZ4),

@@ -44,10 +44,10 @@ router.get('/', async (req, res) => {
     try {
         const result = await tq(req, `
             SELECT 
-                id, name, asset_type, icao24, tail_number, airline_code,
+                id, name, asset_type, icao24, callsign, registration,
                 status, threat_level, latitude, longitude, altitude_ft,
                 speed_kts, heading, squawk, location, criticality,
-                is_protected, created_at
+                is_protected, created_at, tail_number, airline_code
             FROM assets
             ORDER BY 
                 CASE threat_level 

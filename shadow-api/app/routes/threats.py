@@ -2,7 +2,7 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║  Shadow NDR – Threat Intelligence Engine  v3.0  «Ultimate Edition»          ║
-║  Full integration with anomaly_detector v7 · Railway / ICS / NDR            ║
+║  Full integration with anomaly_detector v7 · Aviation / ICS / NDR           ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 גרסה 3.0 — שדרוג מלא מעל v2, כולל אינטגרציה ישירה עם anomaly_detector v7:
@@ -559,9 +559,9 @@ class RiskScoringEngine:
     """
 
     _ASSET_CRITICALITY: Dict[str, float] = {
-        "192.168.100.":   1.0,    # Train Control Network
-        "10.0.100.":      0.9,    # Wayside equipment
-        "172.16.":        0.6,    # Corporate network
+        "192.168.100.":   1.0,    # Flight Operations / cockpit uplink
+        "10.0.100.":      0.9,    # Airport ground / ATC equipment
+        "172.16.":        0.6,    # Airline corporate network
     }
 
     def compute(
@@ -1617,12 +1617,12 @@ _PLAYBOOKS: Dict[str, List[str]] = {
     "SYN_FLOOD":     ["Block source IP in firewall",  "Enable SYN cookies",
                       "Increase SYN backlog (sysctl)", "Notify NOC"],
     "PORT_SCAN":     ["Quarantine src IP for 1h",     "Review exposed services"],
-    "ETCS_SPOOFING": ["IMMEDIATE: Notify train operator", "Activate ETCS fallback mode",
-                      "Preserve packet captures",     "File ICS-CERT incident"],
-    "MVB_REPLAY":    ["Disconnect suspicious MVB device", "Re-sync sequence counters",
-                      "Enable sequence-number monitoring"],
-    "TRDP_INJECT":   ["Verify TRDP checksums on all nodes", "Isolate affected Comid",
-                      "Review PLC logic for unexpected state changes"],
+    "ADS_B_SPOOFING": ["IMMEDIATE: Notify ATC and flight ops", "Cross-check with primary radar / Mode-S",
+                        "Preserve packet captures",              "File ICAO / FAA incident report"],
+    "ACARS_INJECTION": ["Isolate affected ACARS endpoint",       "Re-auth uplink with datalink provider",
+                        "Enable sequence-number monitoring"],
+    "MODE_S_REPLAY":   ["Verify Mode-S CRC across receivers",    "Isolate compromised receiver site",
+                        "Review FMS logic for unexpected state changes"],
     "C2_BEACON":     ["Block outbound to C2 IP/domain", "Isolate affected host",
                       "Revoke credentials for active accounts", "Report to NCSC"],
     "LATERAL_MOVEMENT": ["Segment affected VLAN", "Reset passwords on src host",

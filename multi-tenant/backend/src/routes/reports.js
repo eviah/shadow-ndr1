@@ -60,7 +60,7 @@ router.get('/', async (req, res) => {
     try {
         const [reports, countResult] = await Promise.all([
             tq(req, `
-                SELECT 
+                SELECT
                     threat_id,
                     threat_type,
                     severity,
@@ -73,11 +73,11 @@ router.get('/', async (req, res) => {
                     asset_id,
                     aircraft_name,
                     icao24,
-                    tail_number,
-                    airline_code,
+                    callsign,
+                    registration AS tail_number,
                     location,
                     current_threat_level,
-                    is_protected,
+                    protected AS is_protected,
                     latitude,
                     longitude,
                     altitude_ft,
@@ -280,7 +280,7 @@ router.get('/export/all', async (req, res) => {
     
     try {
         const result = await tq(req, `
-            SELECT 
+            SELECT
                 threat_id,
                 threat_type,
                 severity,
@@ -292,11 +292,10 @@ router.get('/export/all', async (req, res) => {
                 resolved_at,
                 aircraft_name,
                 icao24,
-                tail_number,
-                airline_code,
+                registration AS tail_number,
                 location,
                 current_threat_level,
-                is_protected
+                protected AS is_protected
             FROM v_attack_reports
             WHERE ${whereClause}
             ORDER BY detected_at DESC
@@ -307,7 +306,7 @@ router.get('/export/all', async (req, res) => {
             const headers = [
                 'Threat ID', 'Type', 'Severity', 'Description', 'Score', 'MITRE',
                 'Status', 'Detected At', 'Resolved At', 'Aircraft', 'ICAO24',
-                'Tail Number', 'Airline', 'Location', 'Threat Level', 'Protected'
+                'Tail Number', 'Location', 'Threat Level', 'Protected'
             ];
             
             const rows = result.rows.map(r => [
@@ -323,7 +322,6 @@ router.get('/export/all', async (req, res) => {
                 r.aircraft_name || '',
                 r.icao24 || '',
                 r.tail_number || '',
-                r.airline_code || '',
                 r.location || '',
                 r.current_threat_level,
                 r.is_protected ? 'Yes' : 'No'

@@ -57,7 +57,7 @@ pub const BAGGAGE_ADDRESS_END: u32 = 0x02_FFFF;
 // SECURITY & CRITICALITY LEVELS
 // =============================================================================
 
-/// Railway‑critical command severity levels (extended for aviation).
+/// Aviation‑critical command severity levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CriticalityLevel {
     /// Normal operational data.
@@ -458,7 +458,7 @@ pub enum InfoVal {
 }
 
 impl InfoVal {
-    /// Determine the criticality level of this value for railway/aviation safety.
+    /// Determine the criticality level of this value for aviation safety.
     pub fn criticality(&self) -> CriticalityLevel {
         match self {
             // Critical emergency commands

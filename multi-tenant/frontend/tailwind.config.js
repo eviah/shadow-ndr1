@@ -8,10 +8,9 @@ export default {
     },
     colors: {
       s: {
-        void:'#030610', deep:'#07091a', panel:'#0b0f22',
-        border:'#15203a', accent:'#00d9f7', warn:'#ff7b00',
-        danger:'#ff1f4c', ok:'#00e87a', purple:'#8b5cf6', gold:'#fbbf24',
-        
+        void:'#0a0a0b', deep:'#101012', panel:'#161618',
+        border:'#27272a', accent:'#d97706', warn:'#d97706',
+        danger:'#b91c1c', ok:'#059669', purple:'#52525b', gold:'#ca8a04',
       }
     },
     animation: {

@@ -283,7 +283,7 @@ const CopilotChat = ({ onNavigate, onFilterAssets, onSelectAsset, onAcknowledgeA
   useEffect(() => {
     const checkOllama = async () => {
       try {
-        const res = await fetch('http://localhost:11434/api/tags');
+        const res = await fetch('/ollama/api/tags');
         setOllamaStatus(res.ok ? 'ready' : 'offline');
       } catch { setOllamaStatus('offline'); }
     };
@@ -484,7 +484,7 @@ const CopilotChat = ({ onNavigate, onFilterAssets, onSelectAsset, onAcknowledgeA
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 25000);
-        const response = await fetch('http://localhost:11434/api/generate', {
+        const response = await fetch('/ollama/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
@@ -510,101 +510,167 @@ const CopilotChat = ({ onNavigate, onFilterAssets, onSelectAsset, onAcknowledgeA
     <>
       <motion.button
         onClick={() => setOpen(true)}
-        className="fixed z-[9999] w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all hover:scale-105 group"
-        style={{ bottom: '20px', right: '20px', background: 'linear-gradient(135deg, #00d9f7, #8b5cf6)' }}
+        className="fixed z-[9999] w-12 h-12 rounded shadow-2xl flex items-center justify-center transition-all hover:brightness-125 group border border-[#27272a]"
+        style={{ bottom: '20px', right: '20px', background: '#1c1c20' }}
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
       >
-        <i className="fas fa-robot text-white text-lg" />
-        {ollamaStatus === 'ready' && <span className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full animate-pulse" />}
+        <i className="fas fa-robot text-[#d97706] text-lg" />
+        {ollamaStatus === 'ready' && <span className="absolute -top-1 -right-1 w-3 h-3 bg-[#d97706] rounded-full animate-pulse blur-[1px]" />}
       </motion.button>
 
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            initial={{ opacity: 0, scale: 0.98, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed z-[9999] w-[460px] rounded-xl shadow-2xl flex flex-col overflow-hidden backdrop-blur-sm"
-            style={{ bottom: '90px', right: '20px', background: 'rgba(8, 12, 26, 0.95)', border: '1px solid rgba(0,217,247,0.4)', backdropFilter: 'blur(10px)' }}
+            exit={{ opacity: 0, scale: 0.98, y: 10 }}
+            className="fixed z-[9999] w-[460px] rounded border border-[#27272a] shadow-[0_20px_50px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden backdrop-blur-md mono"
+            style={{ bottom: '90px', right: '20px', background: 'rgba(22, 22, 24, 0.98)' }}
           >
-            <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'rgba(0,217,247,0.2)' }}>
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #00d9f7, #8b5cf6)' }}>
-                  <i className="fas fa-robot text-white text-xs" />
+            {/* Window Header */}
+            <div className="flex items-center justify-between px-4 py-2 bg-[#1c1c20] border-b border-[#27272a]">
+              <div className="flex items-center gap-3">
+                <div className="w-7 h-7 rounded border border-[#3f3f46] flex items-center justify-center bg-[#101012]">
+                  <i className="fas fa-robot text-[#d97706] text-[10px]" />
                 </div>
                 <div>
-                  <span className="text-sm font-semibold text-gradient">Shadow Copilot Ultimate</span>
-                  <div className="flex items-center gap-1 text-[9px]">
-                    <div className={`w-1.5 h-1.5 rounded-full ${ollamaStatus === 'ready' ? 'bg-green-500' : 'bg-red-500'}`} />
-                    <span className="text-gray-400">{ollamaStatus === 'ready' ? 'AI Ready' : 'RAG Mode'}</span>
-                    <span className="text-gray-600 mx-1">•</span>
-                    <button onClick={() => setUseRAGOnly(!useRAGOnly)} className="hover:text-s-accent transition-colors text-gray-400 text-[9px]">
-                      {useRAGOnly ? '📚 RAG Only' : '🧠 AI+RAG'}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold tracking-widest text-[#e4e4e7] uppercase">Shadow Copilot_v5.0</span>
+                    <span className="status-dot live" style={{ width: '4px', height: '4px' }}></span>
+                  </div>
+                  <div className="flex items-center gap-1 text-[8px] uppercase tracking-tighter opacity-70">
+                    <span className={ollamaStatus === 'ready' ? 'text-[#10b981]' : 'text-[#ef4444]'}>
+                      {ollamaStatus === 'ready' ? 'Core_Online' : 'Local_Off'}
+                    </span>
+                    <span className="text-[#52525b]">|</span>
+                    <button onClick={() => setUseRAGOnly(!useRAGOnly)} className="hover:text-[#d97706] transition-colors text-[#a1a1aa]">
+                      {useRAGOnly ? '[KB_ONLY]' : '[NEURAL+KB]'}
                     </button>
-                    <span className="text-gray-600 mx-1">•</span>
-                    <span className="text-gray-400 text-[9px]">{LANGUAGES[currentLang]?.flag || '🌐'} {LANGUAGES[currentLang]?.name || 'עברית'}</span>
+                    <span className="text-[#52525b]">|</span>
+                    <span className="text-[#a1a1aa]">{LANGUAGES[currentLang]?.dir === 'rtl' ? 'HEB' : 'ENG'}</span>
                   </div>
                 </div>
               </div>
-              <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-white"><i className="fas fa-times" /></button>
+              <button 
+                onClick={() => setOpen(false)} 
+                className="w-6 h-6 flex items-center justify-center text-[#71717a] hover:text-[#ef4444] transition-colors"
+                title="CLOSE_TERMINAL [ESC]"
+              >
+                <i className="fas fa-times text-xs" />
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-2" style={{ maxHeight: '400px', minHeight: '320px' }}>
+            {/* Chat Area */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth" style={{ maxHeight: '420px', minHeight: '340px' }}>
               {messages.slice(-20).map((msg) => (
-                <motion.div key={msg.id} initial={{ opacity: 0, x: msg.role === 'user' ? 20 : -20 }} animate={{ opacity: 1, x: 0 }} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs whitespace-pre-wrap ${msg.role === 'user' ? 'bg-gradient-to-r from-s-accent/20 to-purple-500/20 text-s-accent' : 'bg-gray-800/50 text-gray-200 border border-gray-700'}`}>
+                <motion.div 
+                  key={msg.id} 
+                  initial={{ opacity: 0, y: 5 }} 
+                  animate={{ opacity: 1, y: 0 }} 
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div 
+                    className={`max-w-[88%] rounded-sm px-3 py-2 text-[12px] leading-relaxed relative ${
+                      msg.role === 'user' 
+                        ? 'bg-[#1c1c20] text-[#e4e4e7] border-r-2 border-[#d97706] shadow-sm' 
+                        : 'bg-[#101012] text-[#a1a1aa] border border-[#27272a]'
+                    }`}
+                  >
+                    {msg.role === 'ai' && (
+                      <div className="text-[8px] uppercase tracking-widest text-[#d97706] mb-1 opacity-60">
+                        System_Output {'>'}
+                      </div>
+                    )}
                     {msg.text}
-                    <div className="text-[9px] text-gray-500 mt-1">{new Date(msg.timestamp).toLocaleTimeString()}</div>
+                    <div className="text-[8px] text-[#52525b] mt-2 flex justify-between uppercase">
+                      <span>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      {msg.role === 'user' && <span className="text-[#71717a]">_User</span>}
+                    </div>
                   </div>
                 </motion.div>
               ))}
               {loading && (
                 <div className="flex justify-start">
-                  <div className="bg-gray-800/50 rounded-2xl px-3 py-2 text-xs text-gray-400 flex items-center gap-1">
-                    <span>🤔</span>
-                    <span className="animate-pulse">{currentLang === 'he' ? 'חושב' : 'Thinking'}</span>
-                    <span className="w-1 h-1 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
-                    <span className="w-1 h-1 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-                    <span className="w-1 h-1 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }} />
+                  <div className="bg-[#101012] rounded-sm px-3 py-2 text-[10px] text-[#71717a] flex items-center gap-2 border border-[#27272a] italic">
+                    <span className="w-2 h-2 bg-[#d97706] rounded-full animate-ping opacity-40" />
+                    <span>{currentLang === 'he' ? 'מעבד נתונים...' : 'Processing_Stream...'}</span>
                   </div>
                 </div>
               )}
               <div ref={messagesEndRef} />
             </div>
 
-            {suggestions.length > 0 && !loading && (
-              <div className="px-3 py-2 border-t border-gray-700/30">
-                <div className="text-[9px] text-gray-500 mb-1">💡 {currentLang === 'he' ? 'הצעות' : 'Suggestions'}:</div>
-                <div className="flex flex-wrap gap-1">
-                  {suggestions.map((s, i) => (
-                    <button key={i} onClick={() => setInput(s.type === 'threat' ? `מה זה ${s.key}?` : `פרטי ${s.key}`)} className="text-[9px] px-2 py-0.5 rounded-full bg-gray-700/50 text-gray-300 hover:bg-s-accent/20">
-                      {s.type === 'threat' ? `🛡️ ${s.key}` : s.type === 'asset' ? `✈️ ${s.key}` : `📋 ${s.key}`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Context Panel */}
+            <AnimatePresence>
+              {suggestions.length > 0 && !loading && (
+                <motion.div 
+                  initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }}
+                  className="px-4 py-2 bg-[#0a0a0b] border-t border-[#27272a]"
+                >
+                  <div className="text-[9px] text-[#71717a] mb-2 uppercase tracking-widest flex items-center gap-1">
+                    <span className="w-1 h-3 bg-[#d97706]"></span>
+                    {currentLang === 'he' ? 'רפרונסים במערכת' : 'System_References'}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {suggestions.map((s, i) => (
+                      <button 
+                        key={i} 
+                        onClick={() => setInput(s.type === 'threat' ? `מה זה ${s.key}?` : `פרטי ${s.key}`)} 
+                        className="text-[9px] px-2 py-1 rounded-sm bg-[#1c1c20] text-[#a1a1aa] border border-[#27272a] hover:border-[#d97706] transition-colors"
+                      >
+                        {s.type === 'threat' ? `${">"} ${s.key}` : s.type === 'asset' ? `[FLT] ${s.key}` : `[PROC] ${s.key}`}
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-            <div className="px-3 py-2 border-t border-gray-700/30">
-              <div className="flex flex-wrap gap-1">
+            {/* Quick Actions (Mini Command Hub) */}
+            <div className="px-4 py-2 bg-[#101012] border-t border-[#27272a]">
+              <div className="flex flex-wrap gap-1.5">
                 {quickSuggestions.map((s, i) => (
-                  <button key={i} onClick={() => setInput(s.text.replace(/^[^\w]+/, ''))} className="text-[9px] px-2 py-0.5 rounded-full bg-gray-800/50 text-gray-400 hover:text-s-accent">
-                    {s.text}
+                  <button 
+                    key={i} 
+                    onClick={() => setInput(s.text.replace(/^[^\w]+/, ''))} 
+                    className="text-[9px] px-2 py-0.5 rounded-sm border border-transparent text-[#71717a] hover:text-[#d97706] hover:bg-[#1c1c20] transition-all uppercase tracking-tighter"
+                  >
+                    [{s.text.substring(0, 15)}...]
                   </button>
                 ))}
               </div>
             </div>
 
-            <div className="p-3 border-t border-gray-700/30">
-              <div className="flex gap-2">
-                <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} placeholder={currentLang === 'he' ? 'פקודות: ניווט, חסום IP, שלח התרעה ל-ATC, נוהל חירום, חיפוש...' : 'Commands: navigate, block IP, send ATC alert, emergency procedure, search...'} className="flex-1 bg-gray-900/50 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-s-accent/50" disabled={loading} />
-                <button onClick={send} disabled={loading || !input.trim()} className="px-3 py-2 rounded-xl bg-gradient-to-r from-s-accent to-purple-500 text-white text-sm disabled:opacity-50 transition-all hover:scale-105">
-                  <i className="fas fa-paper-plane" />
+            {/* Input Terminal */}
+            <div className="p-4 bg-[#101012] border-t border-[#27272a]">
+              <div className="flex gap-2 p-1 bg-[#0a0a0b] border border-[#3f3f46] rounded-sm focus-within:border-[#d97706] transition-colors shadow-inner">
+                <div className="flex items-center px-2 text-[#d97706] opacity-60">
+                  <span className="text-xs font-bold leading-none">$</span>
+                </div>
+                <input 
+                  ref={inputRef} 
+                  value={input} 
+                  onChange={e => setInput(e.target.value)} 
+                  onKeyDown={e => e.key === 'Enter' && send()} 
+                  placeholder={currentLang === 'he' ? 'הקלד פקודה...' : 'Awaiting command...'} 
+                  className="flex-1 bg-transparent py-2 text-[13px] text-[#e4e4e7] outline-none placeholder-[#52525b] selection:bg-[#d97706] selection:text-white"
+                  disabled={loading} 
+                />
+                <button 
+                  onClick={send} 
+                  disabled={loading || !input.trim()} 
+                  className="w-10 flex items-center justify-center text-[#71717a] hover:text-[#d97706] disabled:opacity-30 transition-colors"
+                >
+                  <i className="fas fa-chevron-right" />
                 </button>
               </div>
-              <div className="text-[8px] text-center text-gray-600 mt-2">
-                {useRAGOnly ? '📚 RAG Mode (מהיר)' : '🧠 AI+RAG Mode (חכם יותר)'} | 🚫 "חסום IP 1.2.3.4" | 📡 "שלח התרעה ל-ATC" | ⚡ "בצע נוהל חירום"
+              <div className="flex justify-between items-center mt-3 text-[8px] text-[#52525b] uppercase tracking-widest mono">
+                <div className="flex gap-4">
+                  <span>MEM: 128MB</span>
+                  <span>LATENCY: 14ms</span>
+                </div>
+                <div className="text-[#a1a1aa] opacity-40">Shadow_Kernel_v5.0</div>
               </div>
             </div>
           </motion.div>

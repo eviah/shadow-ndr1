@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement,
          BarElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import { Line } from 'react-chartjs-2';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
@@ -18,22 +18,23 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement,
 
 // ========== 1. CONSTANTS & HELPERS ==========
 const SEV = {
-  emergency: '#ff1f4c', critical: '#ff4569', high: '#ff9c33',
-  medium: '#fbbf24', low: '#00e87a', info: '#00d9f7', safe: '#00e87a'
+  emergency: '#b91c1c', critical: '#ef4444', high: '#f59e0b',
+  medium: '#eab308', low: '#10b981', info: '#d97706', safe: '#10b981'
 };
 const SevBadge = ({ s }) => <span className={`badge badge-${s}`}>{s}</span>;
 
 // ========== 2. TOASTS ==========
 const ToastContainer = ({ toasts, onDismiss }) => (
-  <div className="fixed top-4 right-4 z-[9999] space-y-2 w-80">
+  <div className="fixed top-4 right-4 z-[9999] space-y-2 w-80 mono">
     <AnimatePresence>
       {toasts.map(t => (
-        <motion.div key={t.id} initial={{ opacity: 0, x: 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 60 }}
-          className="panel p-3 cursor-pointer flex items-start gap-3" onClick={() => onDismiss(t.id)}>
-          <div className="w-1.5 h-full rounded-full flex-shrink-0 mt-0.5" style={{ background: SEV[t.severity] || '#00d9f7', minHeight: 12 }} />
+        <motion.div key={t.id} initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+          className="panel p-3 cursor-pointer flex items-start gap-4 border-l-2" 
+          style={{ borderLeftColor: SEV[t.severity] || '#d97706' }}
+          onClick={() => onDismiss(t.id)}>
           <div className="flex-1 min-w-0">
-            <div className="text-xs font-body text-gray-300 leading-snug">{t.message}</div>
-            <div className="text-[10px] mono text-gray-600 mt-0.5">{t.event}</div>
+            <div className="text-[11px] text-gray-300 leading-snug uppercase tracking-tight">{t.message}</div>
+            <div className="text-[9px] text-[#52525b] mt-1">LOG {'>'} {t.event}</div>
           </div>
         </motion.div>
       ))}
@@ -43,15 +44,19 @@ const ToastContainer = ({ toasts, onDismiss }) => (
 
 // ========== 3. METRIC CARD ==========
 const MCard = ({ label, value, icon, color, sub }) => (
-  <motion.div whileHover={{ y: -2 }} className="panel p-5">
-    <div className="flex items-center justify-between mb-3">
-      <span className="text-[10px] mono text-gray-600 tracking-widest uppercase">{label}</span>
-      <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: `${color}18`, border: `1px solid ${color}40` }}>
-        <i className={`fas fa-${icon} text-xs`} style={{ color }} />
-      </div>
+  <motion.div whileHover={{ y: -1 }} className="panel p-5 overflow-hidden group">
+    <div className="absolute top-0 right-0 p-1 opacity-10">
+      <i className={`fas fa-${icon} text-4xl mr-[-10px] mt-[-10px]`} style={{ color }} />
     </div>
-    <div className="text-3xl font-body font-semibold" style={{ color }}>{value ?? 0}</div>
-    {sub && <div className="text-[10px] text-gray-600 mt-1">{sub}</div>}
+    <div className="flex items-center justify-between mb-4 border-b border-[#27272a] pb-2">
+      <span className="text-[9px] mono text-[#71717a] tracking-[0.2em] uppercase flex items-center gap-2">
+        <span className="w-1 h-3 bg-current" style={{ backgroundColor: color }}></span>
+        {label}
+      </span>
+      <div className="mono text-[10px] text-[#52525b] group-hover:text-[#a1a1aa]">00x{Math.floor(Math.random()*100)}</div>
+    </div>
+    <div className="text-3xl mono font-bold tracking-tighter" style={{ color }}>{value ?? 0}</div>
+    {sub && <div className="text-[9px] mono text-[#52525b] mt-2 uppercase tracking-wide opacity-80">{sub}</div>}
   </motion.div>
 );
 
@@ -67,44 +72,48 @@ const NAV = [
 ];
 
 const Sidebar = ({ page, setPage, user, logout, unacked }) => (
-  <aside className="fixed left-0 top-0 bottom-0 flex flex-col z-40" style={{ width: 220, background: '#04060e', borderRight: '1px solid #15203a' }}>
-    <div className="px-4 py-5 border-b border-s-border">
-      <div className="flex items-center gap-2.5 mb-1">
-        <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: '#00d9f715', border: '1px solid #00d9f740' }}>
-          <i className="fas fa-shield-halved text-xs" style={{ color: '#00d9f7' }} />
+  <aside className="fixed left-0 top-0 bottom-0 flex flex-col z-40 bg-[#0a0a0b]" style={{ width: 220, borderRight: '1px solid #27272a' }}>
+    <div className="px-5 py-6 border-b border-[#27272a] bg-[#101012]">
+      <div className="flex items-center gap-3 mb-1">
+        <div className="w-8 h-8 rounded-sm flex items-center justify-center flex-shrink-0 bg-[#0a0a0b] border border-[#3f3f46]">
+          <i className="fas fa-shield-halved text-[10px] text-[#d97706]" />
         </div>
-        <span className="font-display font-bold text-sm text-gradient">SHADOW NDR</span>
+        <div>
+          <span className="font-display font-black text-xs text-[#e4e4e7] tracking-[0.25em] uppercase">Shadow_Kernel</span>
+          <div className="text-[8px] mono text-[#71717a] tracking-normal">SYS_VERSION: 11.0_PRO</div>
+        </div>
       </div>
-      <div className="text-[10px] mono text-gray-600 pl-9">{user?.tenant_name}</div>
     </div>
-    <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+    
+    <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+      <div className="text-[9px] mono text-[#52525b] px-3 mb-2 uppercase tracking-[0.2em]">Nav_Dir</div>
       {NAV.map(({ id, icon, label }) => (
         <button key={id} onClick={() => setPage(id)}
-          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150 relative ${page === id ? 'text-s-accent' : 'text-gray-500 hover:text-gray-300'}`}
-          style={page === id ? { background: 'rgba(0,217,247,0.08)', border: '1px solid rgba(0,217,247,0.15)' } : {}}>
-          <i className={`fas fa-${icon} w-4 text-xs`} />
-          <span className="font-body">{label}</span>
+          className={`w-full flex items-center gap-4 px-3 py-2 rounded-sm text-[11px] mono transition-all duration-100 uppercase relative group ${page === id ? 'text-[#d97706]' : 'text-[#71717a] hover:text-[#e4e4e7] hover:bg-[#161618]'}`}
+          style={page === id ? { background: 'rgba(217,119,6,0.05)', border: '1px solid rgba(217,119,6,0.15)' } : {}}>
+          <i className={`fas fa-${icon} w-4 text-[10px] opacity-70 group-hover:opacity-100`} />
+          <span className="tracking-tighter">{label}</span>
+          {page === id && <span className="ml-auto text-[10px] opacity-100">_</span>}
           {id === 'alerts' && unacked > 0 && (
-            <span className="ml-auto text-[10px] font-mono px-1.5 py-0.5 rounded-full"
-              style={{ background: 'rgba(255,31,76,0.2)', color: '#ff4569', border: '1px solid rgba(255,31,76,0.3)' }}>
+            <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded-sm bg-[#b91c1c] text-white animate-pulse">
               {unacked}
             </span>
           )}
         </button>
       ))}
     </nav>
-    <div className="p-3 border-t border-s-border">
-      <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg" style={{ background: '#07091a', border: '1px solid #15203a' }}>
-        <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold"
-          style={{ background: '#00d9f720', color: '#00d9f7', border: '1px solid #00d9f740' }}>
+    
+    <div className="p-4 border-t border-[#27272a] bg-[#0a0a0b]">
+      <div className="flex items-center gap-3 px-3 py-3 rounded-sm bg-[#101012] border border-[#27272a]">
+        <div className="w-8 h-8 rounded-sm flex items-center justify-center flex-shrink-0 text-[11px] font-bold bg-[#0a0a0b] border border-[#27272a] text-[#a1a1aa] mono">
           {user?.username?.[0]?.toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-xs text-gray-300 truncate">{user?.username}</div>
-          <div className="text-[10px] mono text-gray-600">{user?.role}</div>
+          <div className="text-[11px] text-[#e4e4e7] truncate mono">{user?.username}</div>
+          <div className="text-[9px] mono text-[#52525b] uppercase">{user?.role}</div>
         </div>
-        <button onClick={logout} title="Logout" className="text-gray-600 hover:text-s-danger transition-colors text-xs">
-          <i className="fas fa-right-from-bracket" />
+        <button onClick={logout} title="TERM_LOGOUT" className="w-6 h-6 flex items-center justify-center rounded-sm bg-[#1c1c20] border border-[#3f3f46] text-[#71717a] hover:text-[#ef4444] hover:border-[#b91c1c] transition-all">
+          <i className="fas fa-power-off text-[10px]" />
         </button>
       </div>
     </div>
@@ -126,8 +135,8 @@ const ForecastChart = ({ timeline }) => {
   const data = {
     labels,
     datasets: [
-      { label: 'Actual', data: (timeline || []).map(d => d.count), borderColor: '#00d9f7', borderWidth: 2, fill: false, pointRadius: 3 },
-      { label: 'AI Forecast', data: [...(timeline || []).slice(-1).map(d => d.count), ...forecast], borderColor: '#ff7b00', borderDash: [5, 5], fill: false, pointRadius: 2 }
+      { label: 'Actual', data: (timeline || []).map(d => d.count), borderColor: '#d97706', borderWidth: 2, fill: false, pointRadius: 3 },
+      { label: 'AI Forecast', data: [...(timeline || []).slice(-1).map(d => d.count), ...forecast], borderColor: '#d97706', borderDash: [5, 5], fill: false, pointRadius: 2 }
     ]
   };
   return (
@@ -149,22 +158,22 @@ const Dashboard = ({ data }) => {
   const chartData = {
     labels,
     datasets: [
-      { label: 'All', data: (timeline || []).map(d => d.count), borderColor: '#00d9f7', backgroundColor: 'rgba(0,217,247,.08)', fill: true, tension: .4, pointRadius: 3, borderWidth: 1.5 },
-      { label: 'Crit', data: (timeline || []).map(d => d.critical), borderColor: '#ff1f4c', backgroundColor: 'rgba(255,31,76,.06)', fill: true, tension: .4, pointRadius: 3, borderWidth: 1.5 },
+      { label: 'All', data: (timeline || []).map(d => d.count), borderColor: '#d97706', backgroundColor: 'rgba(217,119,6,.08)', fill: true, tension: .4, pointRadius: 3, borderWidth: 1.5 },
+      { label: 'Crit', data: (timeline || []).map(d => d.critical), borderColor: '#b91c1c', backgroundColor: 'rgba(185,28,28,.06)', fill: true, tension: .4, pointRadius: 3, borderWidth: 1.5 },
     ]
   };
   return (
     <div id="report-pdf-content">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MCard label="Active Threats" value={threats?.active} icon="skull-crossbones" color="#ff1f4c" sub={`${threats?.total || 0} total / 24h`} />
-        <MCard label="Critical" value={threats?.critical} icon="radiation" color="#ff7b00" sub={`avg score ${parseFloat(threats?.avg_score || 0).toFixed(2)}`} />
-        <MCard label="Fleet Online" value={assets?.active} icon="plane" color="#00e87a" sub={`${assets?.under_attack || 0} under attack`} />
-        <MCard label="Unacked Alerts" value={alerts?.unacked} icon="bell" color="#fbbf24" sub="last 6 hours" />
+        <MCard label="Active Threats" value={threats?.active} icon="skull-crossbones" color="#b91c1c" sub={`${threats?.total || 0} total / 24h`} />
+        <MCard label="Critical" value={threats?.critical} icon="radiation" color="#d97706" sub={`avg score ${parseFloat(threats?.avg_score || 0).toFixed(2)}`} />
+        <MCard label="Fleet Online" value={assets?.active} icon="plane" color="#10b981" sub={`${assets?.under_attack || 0} under attack`} />
+        <MCard label="Unacked Alerts" value={alerts?.unacked} icon="bell" color="#eab308" sub="last 6 hours" />
       </div>
       <div className="grid grid-cols-5 gap-4 mt-5">
         <div className="col-span-3 panel p-5" style={{ height: 240 }}>
           <h3 className="text-[10px] mono text-s-accent tracking-widest uppercase mb-4">Threat Timeline – 12h</h3>
-          <div style={{ height: 180 }}><Line data={chartData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0b0f22', borderColor: '#15203a', borderWidth: 1, titleColor: '#00d9f7', bodyColor: '#9ca3af' } }, scales: { x: { ticks: { color: '#374151', font: { family: 'Share Tech Mono', size: 10 } }, grid: { color: '#15203a' } }, y: { ticks: { color: '#374151', font: { family: 'Share Tech Mono', size: 10 } }, grid: { color: '#15203a' } } } }} /></div>
+          <div style={{ height: 180 }}><Line data={chartData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#161618', borderColor: '#27272a', borderWidth: 1, titleColor: '#d97706', bodyColor: '#9ca3af' } }, scales: { x: { ticks: { color: '#374151', font: { family: 'Share Tech Mono', size: 10 } }, grid: { color: '#27272a' } }, y: { ticks: { color: '#374151', font: { family: 'Share Tech Mono', size: 10 } }, grid: { color: '#27272a' } } } }} /></div>
         </div>
         <div className="col-span-2 panel p-5">
           <h3 className="text-[10px] mono text-s-accent tracking-widest uppercase mb-4">Risk Leaderboard</h3>
@@ -178,9 +187,9 @@ const Dashboard = ({ data }) => {
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-14 h-1 rounded-full bg-s-border overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${r.risk_score}%`, background: r.risk_score > 80 ? '#ff1f4c' : r.risk_score > 60 ? '#ff7b00' : '#fbbf24' }} />
+                    <div className="h-full rounded-full" style={{ width: `${r.risk_score}%`, background: r.risk_score > 80 ? '#b91c1c' : r.risk_score > 60 ? '#d97706' : '#eab308' }} />
                   </div>
-                  <span className="mono text-xs font-semibold" style={{ color: r.risk_score > 80 ? '#ff4569' : r.risk_score > 60 ? '#ff9c33' : '#fbbf24' }}>
+                  <span className="mono text-xs font-semibold" style={{ color: r.risk_score > 80 ? '#ef4444' : r.risk_score > 60 ? '#f59e0b' : '#eab308' }}>
                     {parseFloat(r.risk_score).toFixed(0)}
                   </span>
                 </div>
@@ -202,7 +211,7 @@ const Dashboard = ({ data }) => {
                     <span className="mono text-s-accent">{a.count}</span>
                   </div>
                   <div className="h-1.5 rounded-full bg-s-border overflow-hidden">
-                    <motion.div className="h-full rounded-full" initial={{ width: 0 }} animate={{ width: `${(a.count / max) * 100}%` }} transition={{ delay: i * .04, duration: .5 }} style={{ background: 'linear-gradient(90deg,#00d9f7,#8b5cf6)' }} />
+                    <motion.div className="h-full rounded-full" initial={{ width: 0 }} animate={{ width: `${(a.count / max) * 100}%` }} transition={{ delay: i * .04, duration: .5 }} style={{ background: 'linear-gradient(90deg,#d97706,#52525b)' }} />
                   </div>
                 </div>
               );
@@ -214,7 +223,7 @@ const Dashboard = ({ data }) => {
           <div className="space-y-2 overflow-y-auto" style={{ maxHeight: 220 }}>
             {(recentAlerts || []).map(a => (
               <div key={a.id} className="flex items-start gap-2.5 border-b border-s-border/40 pb-2">
-                <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: SEV[a.severity] || '#00d9f7' }} />
+                <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: SEV[a.severity] || '#d97706' }} />
                 <div className="flex-1 min-w-0">
                   <div className="text-xs text-gray-300 leading-snug truncate">{a.title}</div>
                   <div className="text-[10px] mono text-gray-600">{a.aircraft_name} · {new Date(a.detected_at).toLocaleTimeString()}</div>
@@ -279,7 +288,7 @@ const AssetsPage = ({ assets, user, selectedAsset, onClearSelected }) => {
                   <td className="py-2.5 pr-4 mono text-gray-600">{a.altitude_ft?.toLocaleString() || '–'}</td>
                   <td className="py-2.5 pr-4 mono text-gray-600">{a.speed_kts || '–'}</td>
                   <td className="py-2.5 pr-4 mono text-gray-600">{a.squawk || '–'}</td>
-                  <td className="py-2.5">{a.is_protected ? <span style={{ color: '#00e87a' }}>✓</span> : <span style={{ color: '#ff4569' }}>✗</span>}</td>
+                  <td className="py-2.5">{a.is_protected ? <span style={{ color: '#10b981' }}>✓</span> : <span style={{ color: '#ef4444' }}>✗</span>}</td>
                 </tr>
               ))}
             </tbody>
@@ -311,7 +320,7 @@ const AssetsPage = ({ assets, user, selectedAsset, onClearSelected }) => {
                   ['Protected', sel.is_protected ? '✓ Yes' : '✗ No'],
                   ['Criticality', `${Math.round((sel.criticality || 0) * 100)}%`],
                 ].map(([l, v], i) => (
-                  <div key={i} className="bg-s-void rounded-lg p-3" style={{ border: '1px solid #15203a' }}>
+                  <div key={i} className="bg-s-void rounded-lg p-3" style={{ border: '1px solid #27272a' }}>
                     <div className="text-gray-600 mono text-[10px] uppercase tracking-wider mb-1">{l}</div>
                     <div className="text-gray-200">{v}</div>
                   </div>
@@ -366,7 +375,7 @@ const ThreatsPage = ({ threats, onUpdateStatus }) => {
                 <td className="py-2.5 pr-4 text-gray-300">{t.threat_type}</td>
                 <td className="py-2.5 pr-4"><SevBadge s={t.severity} /></td>
                 <td className="py-2.5 pr-4 text-gray-500 max-w-[120px] truncate">{t.aircraft_name || t.icao24 || '–'}</td>
-                <td className="py-2.5 pr-4 mono" style={{ color: t.score > 0.8 ? '#ff1f4c' : t.score > 0.6 ? '#ff7b00' : '#fbbf24' }}>{parseFloat(t.score || 0).toFixed(3)}</td>
+                <td className="py-2.5 pr-4 mono" style={{ color: t.score > 0.8 ? '#b91c1c' : t.score > 0.6 ? '#d97706' : '#eab308' }}>{parseFloat(t.score || 0).toFixed(3)}</td>
                 <td className="py-2.5 pr-4 mono text-gray-600">{t.mitre_technique || '–'}</td>
                 <td className="py-2.5 pr-4"><span className={`badge badge-${t.status === 'active' ? 'critical' : 'info'}`}>{t.status}</span></td>
                 <td className="py-2.5">
@@ -393,8 +402,8 @@ const AlertsPage = ({ alerts, onAck }) => (
     <div className="space-y-3">
       {(alerts || []).map(a => (
         <motion.div key={a.id} layout className="flex items-start gap-3 p-4 rounded-xl"
-          style={{ background: a.acknowledged ? '#07091a' : `${SEV[a.severity] || '#00d9f7'}08`, border: `1px solid ${a.acknowledged ? '#15203a' : (SEV[a.severity] || '#00d9f7') + '33'}` }}>
-          <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: a.acknowledged ? '#374151' : SEV[a.severity] || '#00d9f7' }} />
+          style={{ background: a.acknowledged ? '#101012' : `${SEV[a.severity] || '#d97706'}08`, border: `1px solid ${a.acknowledged ? '#27272a' : (SEV[a.severity] || '#d97706') + '33'}` }}>
+          <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: a.acknowledged ? '#374151' : SEV[a.severity] || '#d97706' }} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <SevBadge s={a.severity} />
@@ -408,8 +417,8 @@ const AlertsPage = ({ alerts, onAck }) => (
             </div>
           </div>
           {!a.acknowledged && (
-            <button onClick={() => onAck(a.id)} className="text-[10px] mono px-3 py-1.5 rounded-lg flex-shrink-0 transition-colors" style={{ background: 'rgba(0,217,247,0.1)', border: '1px solid rgba(0,217,247,0.3)', color: '#00d9f7' }}>
-              Acknowledge
+            <button onClick={() => onAck(a.id)} className="text-[10px] mono px-3 py-1.5 rounded-sm flex-shrink-0 transition-all bg-[#d9770615] border border-[#d9770640] text-[#d97706] hover:bg-[#d9770630] uppercase">
+              ACK_LOG
             </button>
           )}
         </motion.div>
@@ -441,7 +450,7 @@ const ReportsPage = ({ reports }) => {
                   <td className="py-2.5 pr-4 text-gray-400">{r.aircraft_name || '–'}</td>
                   <td className="py-2.5 pr-4 mono text-gray-600">{r.icao24 || '–'}</td>
                   <td className="py-2.5 pr-4 text-gray-500">{r.location || '–'}</td>
-                  <td className="py-2.5 pr-4 mono" style={{ color: r.score > 0.8 ? '#ff1f4c' : '#ff9c33' }}>{parseFloat(r.score || 0).toFixed(3)}</td>
+                  <td className="py-2.5 pr-4 mono" style={{ color: r.score > 0.8 ? '#b91c1c' : '#f59e0b' }}>{parseFloat(r.score || 0).toFixed(3)}</td>
                   <td className="py-2.5"><span className={`badge badge-${r.threat_status === 'active' ? 'critical' : 'info'}`}>{r.threat_status}</span></td>
                 </tr>
               ))}
@@ -475,21 +484,21 @@ const ReportsPage = ({ reports }) => {
                   ['Threat Level', <span className={`badge badge-${sel.current_threat_level}`}>{sel.current_threat_level}</span>],
                   ['Protected', sel.is_protected ? '✓ Yes' : '✗ No'],
                   ['MITRE', sel.mitre_technique || '–'],
-                  ['Score', <span style={{ color: '#ff4569' }}>{parseFloat(sel.score || 0).toFixed(4)}</span>],
+                  ['Score', <span style={{ color: '#ef4444' }}>{parseFloat(sel.score || 0).toFixed(4)}</span>],
                 ].map(([l, v], i) => (
-                  <div key={i} className="rounded-xl p-3" style={{ background: '#07091a', border: '1px solid #15203a' }}>
+                  <div key={i} className="rounded-xl p-3" style={{ background: '#101012', border: '1px solid #27272a' }}>
                     <div className="mono text-[10px] text-gray-600 uppercase tracking-wider mb-1">{l}</div>
                     <div className="text-gray-200">{v}</div>
                   </div>
                 ))}
               </div>
               {sel.description && (
-                <div className="rounded-xl p-4" style={{ background: '#07091a', border: '1px solid #15203a' }}>
+                <div className="rounded-xl p-4" style={{ background: '#101012', border: '1px solid #27272a' }}>
                   <div className="mono text-[10px] text-gray-600 uppercase tracking-wider mb-2">Description</div>
                   <p className="text-sm text-gray-300 leading-relaxed">{sel.description}</p>
                 </div>
               )}
-              <button className="mt-5 w-full py-2.5 rounded-xl text-sm transition-all" style={{ background: 'rgba(0,217,247,0.08)', border: '1px solid rgba(0,217,247,0.3)', color: '#00d9f7' }} onClick={() => alert('PDF export coming soon')}>
+              <button className="mt-5 w-full py-2.5 rounded-xl text-sm transition-all" style={{ background: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.3)', color: '#d97706' }} onClick={() => alert('PDF export coming soon')}>
                 <i className="fas fa-file-pdf mr-2" />Export PDF Report
               </button>
             </motion.div>
@@ -525,30 +534,179 @@ const AuditPage = ({ auditLog }) => (
 );
 
 // ========== 12. LIVE MAP (2D) ==========
-const makeIcon = (level) => L.divIcon({
-  className: '',
-  html: `<div style="width:28px;height:28px;border-radius:50%;background:${SEV[level] || '#00d9f7'}22;border:2px solid ${SEV[level] || '#00d9f7'};display:flex;align-items:center;justify-content:center;color:${SEV[level] || '#00d9f7'};font-size:14px;${level === 'under_attack' ? 'animation:pulse 1s infinite;' : ''}">✈</div>`,
-  iconSize: [28, 28], iconAnchor: [14, 14],
+// Rotatable plane marker — SVG rotates to match the aircraft heading.
+const planeIcon = (level, heading) => {
+  const c = SEV[level] || '#d97706';
+  const pulse = level === 'under_attack' || level === 'critical';
+  return L.divIcon({
+    className: 'plane-marker',
+    html: `
+      <div style="transform:rotate(${heading || 0}deg);width:32px;height:32px;display:flex;align-items:center;justify-content:center;
+        filter: drop-shadow(0 0 6px ${c});${pulse ? 'animation:pulse 1.2s infinite;' : ''}">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="${c}" stroke="${c}" stroke-width="0.5">
+          <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+        </svg>
+      </div>`,
+    iconSize: [32, 32], iconAnchor: [16, 16],
+  });
+};
+
+const airportIcon = () => L.divIcon({
+  className: 'airport-marker',
+  html: `<div style="width:10px;height:10px;border-radius:50%;background:#52525b;border:2px solid #fff;
+    box-shadow:0 0 8px #52525baa"></div>`,
+  iconSize: [10, 10], iconAnchor: [5, 5],
 });
-const LiveMap = ({ assets }) => {
-  const ac = (assets || []).filter(a => a.asset_type === 'aircraft' && a.latitude && a.longitude);
+
+const FitToPlanes = ({ positions }) => {
+  const map = useMap();
+  const fitted = useRef(false);
+  useEffect(() => {
+    if (fitted.current || !positions.length) return;
+    const bounds = L.latLngBounds(positions);
+    if (bounds.isValid()) map.fitBounds(bounds.pad(0.2));
+    fitted.current = true;
+  }, [positions, map]);
+  return null;
+};
+
+const FlightControlPanel = ({ flight, airports, onClose, onPause, onReroute, onAttack }) => {
+  const [to, setTo] = useState('');
+  const [from, setFrom] = useState('');
+  if (!flight) return null;
+  const codes = Object.keys(airports || {});
   return (
-    <div className="panel" style={{ height: 'calc(100vh - 120px)' }}>
-      <div className="absolute top-4 left-4 z-[1000] panel px-3 py-2">
-        <span className="text-[10px] mono text-s-accent tracking-widest uppercase">Live Radar</span>
-        <span className="ml-3 text-[10px] mono text-gray-600">{ac.length} aircraft</span>
+    <div className="absolute bottom-4 right-4 z-[1000] panel p-4" style={{ width: 300 }}>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="font-display font-bold text-sm text-s-accent">{flight.callsign || flight.icao24}</div>
+          <div className="text-[10px] mono text-gray-500">{flight.icao24} · {flight.from}→{flight.to}</div>
+        </div>
+        <button onClick={onClose} className="text-gray-500 hover:text-white text-xs"><i className="fas fa-xmark" /></button>
       </div>
-      <MapContainer center={[32.0, 34.9]} zoom={8} style={{ height: '100%', borderRadius: 14 }}>
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      <div className="grid grid-cols-3 gap-2 mb-3 text-[10px] mono text-gray-400">
+        <div><div className="text-gray-600 text-[9px] uppercase">ALT</div>{flight.altitude_ft?.toLocaleString()}ft</div>
+        <div><div className="text-gray-600 text-[9px] uppercase">SPD</div>{flight.speed_kts}kt</div>
+        <div><div className="text-gray-600 text-[9px] uppercase">HDG</div>{flight.heading}°</div>
+      </div>
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <button onClick={() => onPause(flight, true)} className="flex-1 text-[10px] py-1.5 rounded border border-s-border hover:border-s-warn/60 text-s-warn"><i className="fas fa-pause mr-1" />Pause</button>
+          <button onClick={() => onPause(flight, false)} className="flex-1 text-[10px] py-1.5 rounded border border-s-border hover:border-s-ok/60 text-s-ok"><i className="fas fa-play mr-1" />Resume</button>
+        </div>
+        <div className="flex gap-2">
+          <select value={from} onChange={e => setFrom(e.target.value)} className="flex-1 text-[10px] bg-s-void border border-s-border rounded px-1.5 py-1 text-gray-300">
+            <option value="">From…</option>{codes.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={to} onChange={e => setTo(e.target.value)} className="flex-1 text-[10px] bg-s-void border border-s-border rounded px-1.5 py-1 text-gray-300">
+            <option value="">To…</option>{codes.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <button onClick={() => from && to && onReroute(flight, from, to)} className="text-[10px] px-2 rounded border border-s-border hover:border-s-accent/60 text-s-accent"><i className="fas fa-route" /></button>
+        </div>
+        <button onClick={() => onAttack(flight)} className="w-full text-[10px] py-1.5 rounded border border-s-danger/40 bg-s-danger/10 text-s-danger hover:bg-s-danger/20"><i className="fas fa-bolt mr-1" />Simulate Attack</button>
+      </div>
+    </div>
+  );
+};
+
+const LiveMap = ({ assets }) => {
+  const [airports, setAirports] = useState({});
+  const [flights, setFlights]   = useState([]);
+  const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    api.getAirports().then(r => setAirports(r.data || {})).catch(() => {});
+    const refresh = () => api.getFlights().then(r => setFlights(r.data || [])).catch(() => {});
+    refresh();
+    const t = setInterval(refresh, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  const ac = (assets || []).filter(a => a.asset_type === 'aircraft' && a.latitude && a.longitude);
+  const positions = ac.map(a => [a.latitude, a.longitude]);
+  const flightById = useMemo(() => {
+    const m = new Map();
+    for (const f of flights) m.set(f.asset_id, f);
+    return m;
+  }, [flights]);
+
+  const underAttackCount = ac.filter(a => a.threat_level === 'under_attack' || a.threat_level === 'critical').length;
+
+  const onPause   = (f, paused) => api.pauseFlight(f.asset_id || f.id, paused);
+  const onReroute = (f, from, to) => api.rerouteFlight(f.asset_id || f.id, from, to);
+  const onAttack  = (f) => api.injectAttack(f.asset_id || f.id, { severity: 'critical', type: 'gps_spoofing' });
+
+  const selectedAsset = ac.find(a => a.id === selected);
+  const selectedSnap  = selectedAsset ? { ...(flightById.get(selectedAsset.id) || {}),
+    asset_id: selectedAsset.id, callsign: selectedAsset.callsign, icao24: selectedAsset.icao24,
+    altitude_ft: selectedAsset.altitude_ft, speed_kts: selectedAsset.speed_kts, heading: selectedAsset.heading,
+  } : null;
+
+  return (
+    <div className="panel relative" style={{ height: 'calc(100vh - 120px)' }}>
+      <div className="absolute top-4 left-4 z-[1000] panel px-3 py-2 flex items-center gap-4">
+        <div><span className="text-[10px] mono text-s-accent tracking-widest uppercase">Live Radar</span>
+             <span className="ml-3 text-[10px] mono text-gray-600">{ac.length} aircraft</span></div>
+        {underAttackCount > 0 && (
+          <div className="text-[10px] mono px-2 py-1 rounded" style={{ background: '#b91c1c22', border: '1px solid #b91c1c66', color: '#ef4444' }}>
+            <i className="fas fa-triangle-exclamation mr-1" />{underAttackCount} UNDER ATTACK
+          </div>
+        )}
+      </div>
+      <MapContainer center={[32.0, 34.9]} zoom={6} style={{ height: '100%', borderRadius: 14, background: '#05070f' }}>
+        <TileLayer
+          attribution='&copy; CARTO'
+          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+        />
+        <FitToPlanes positions={positions} />
+
+        {/* Airports */}
+        {Object.entries(airports).map(([code, ap]) => (
+          <Marker key={code} position={[ap.lat, ap.lon]} icon={airportIcon()}>
+            <Popup>
+              <div style={{ fontFamily: 'Syne,sans-serif', fontWeight: 700, color: '#fff' }}>{ap.name}</div>
+              <div style={{ fontFamily: 'Share Tech Mono', fontSize: 11, color: '#9ca3af' }}>{code} · elev {ap.elev}ft</div>
+            </Popup>
+          </Marker>
+        ))}
+
+        {/* Flight paths: from origin → current → destination */}
+        {ac.map(a => {
+          const f = flightById.get(a.id);
+          if (!f || !airports[f.from] || !airports[f.to]) return null;
+          const origin = [airports[f.from].lat, airports[f.from].lon];
+          const dest   = [airports[f.to].lat, airports[f.to].lon];
+          const level  = a.threat_level;
+          const color  = SEV[level] || '#d97706';
+          return (
+            <React.Fragment key={`path-${a.id}`}>
+              <Polyline positions={[origin, [a.latitude, a.longitude]]}
+                        pathOptions={{ color, weight: 2, opacity: 0.55 }} />
+              <Polyline positions={[[a.latitude, a.longitude], dest]}
+                        pathOptions={{ color, weight: 1, opacity: 0.25, dashArray: '4 6' }} />
+            </React.Fragment>
+          );
+        })}
+
+        {/* Attack halo under any under-attack/critical aircraft */}
+        {ac.filter(a => a.threat_level === 'under_attack' || a.threat_level === 'critical').map(a => (
+          <CircleMarker key={`halo-${a.id}`} center={[a.latitude, a.longitude]}
+            radius={18} pathOptions={{ color: '#b91c1c', fillColor: '#b91c1c', fillOpacity: 0.2, weight: 1 }} />
+        ))}
+
+        {/* Planes */}
         {ac.map(a => (
-          <Marker key={a.id} position={[a.latitude, a.longitude]} icon={makeIcon(a.threat_level)}>
+          <Marker key={a.id}
+                  position={[a.latitude, a.longitude]}
+                  icon={planeIcon(a.threat_level, a.heading)}
+                  eventHandlers={{ click: () => setSelected(a.id) }}>
             <Popup className="shadow-popup">
-              <div style={{ background: '#0b0f22', border: '1px solid #15203a', borderRadius: 8, padding: '8px 12px', minWidth: 200, color: 'white' }}>
+              <div style={{ background: '#161618', border: '1px solid #27272a', borderRadius: 8, padding: '8px 12px', minWidth: 220, color: 'white' }}>
                 <div style={{ fontFamily: 'Syne,sans-serif', fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{a.name}</div>
-                <div style={{ fontFamily: 'Share Tech Mono', fontSize: 11, color: '#6b7280' }}>
+                <div style={{ fontFamily: 'Share Tech Mono', fontSize: 11, color: '#9ca3af' }}>
                   <div>ICAO: {a.icao24} · {a.callsign}</div>
-                  <div>Alt: {a.altitude_ft?.toLocaleString()}ft · {a.speed_kts}kts · {a.heading}°</div>
-                  <div>Squawk: {a.squawk}</div>
+                  <div>{flightById.get(a.id)?.from || '?'} → {flightById.get(a.id)?.to || '?'}</div>
+                  <div>Alt: {a.altitude_ft?.toLocaleString()}ft · {a.speed_kts}kt · {a.heading}°</div>
                   <div style={{ marginTop: 4 }}><span className={`badge badge-${a.threat_level}`}>{a.threat_level}</span></div>
                 </div>
               </div>
@@ -556,275 +714,223 @@ const LiveMap = ({ assets }) => {
           </Marker>
         ))}
       </MapContainer>
+      <FlightControlPanel flight={selectedSnap} airports={airports}
+        onClose={() => setSelected(null)}
+        onPause={onPause} onReroute={onReroute} onAttack={onAttack} />
     </div>
   );
 };
 
-// ========== 13. 3D GLOBE ==========
-// ========== 13. 3D GLOBE – ULTIMATE EDITION ==========
+// ========== 13. 3D GLOBE – live aircraft markers, scene built once ==========
+// Splits concerns: the scene (earth, stars, lights, controls, anim loop) is
+// built once on mount and torn down on unmount. Aircraft markers are synced
+// from `assets` in a second effect so every 2-second position tick doesn't
+// rebuild the whole GL context (which was leaking + freezing the tab).
 const Globe3D = ({ assets }) => {
   const containerRef = useRef();
-  const animationId = useRef();
-  const [error, setError] = useState(false);
+  const sceneRef = useRef(null);          // { scene, camera, renderer, controls, clouds }
+  const markersRef = useRef(new Map());   // asset_id -> THREE.Group
+  const [error] = useState(false);
 
+  const latLonToVector3 = (lat, lon, radius = 5.05) => {
+    const phi = (90 - lat) * Math.PI / 180;
+    const theta = lon * Math.PI / 180;
+    return new THREE.Vector3(
+      radius * Math.sin(phi) * Math.cos(theta),
+      radius * Math.cos(phi),
+      radius * Math.sin(phi) * Math.sin(theta),
+    );
+  };
+
+  const buildAircraftMarker = (threatLevel) => {
+    const color = SEV[threatLevel] || '#d97706';
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.05, 0.32),
+      new THREE.MeshStandardMaterial({ color, emissive: 0x000000, emissiveIntensity: 0.3 }),
+    );
+    group.add(body);
+    const wings = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.02, 0.08),
+      new THREE.MeshStandardMaterial({ color }),
+    );
+    wings.position.set(0, 0, -0.05);
+    group.add(wings);
+    const tail = new THREE.Mesh(
+      new THREE.ConeGeometry(0.06, 0.1, 4),
+      new THREE.MeshStandardMaterial({ color }),
+    );
+    tail.position.set(0, 0.04, -0.14);
+    group.add(tail);
+    if (threatLevel === 'under_attack' || threatLevel === 'critical') {
+      const glow = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0xff3300, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending }),
+      );
+      glow.userData.isGlow = true;
+      group.add(glow);
+    }
+    group.userData.threatLevel = threatLevel;
+    return group;
+  };
+
+  // Build scene once.
   useEffect(() => {
     if (!containerRef.current) return;
-    
-    // Setup scene
+    const container = containerRef.current;
+
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x050b1a); // כחול עמוק לילה
-    scene.fog = new THREE.FogExp2(0x050b1a, 0.0008); // ערפל קל לעומק
-    
-    // Camera
+    scene.background = new THREE.Color(0x050b1a);
+    scene.fog = new THREE.FogExp2(0x050b1a, 0.0008);
+
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
     camera.position.set(0, 0, 13);
-    
-    // Renderer
+
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+    renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
-    containerRef.current.appendChild(renderer.domElement);
-    
-    // Controls
+    container.appendChild(renderer.domElement);
+
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.autoRotate = true;
     controls.autoRotateSpeed = 0.5;
-    controls.enableZoom = true;
     controls.enablePan = false;
     controls.zoomSpeed = 1.2;
     controls.rotateSpeed = 0.8;
-    
-    // Earth with high-res texture + bump map + specular
-    const geometry = new THREE.SphereGeometry(5, 128, 128);
+
     const textureLoader = new THREE.TextureLoader();
-    
-    // נסה לטעון טקסטורה באיכות גבוהה (עם fallback)
-    let earthMaterial;
-    try {
-      const colorMap = textureLoader.load('https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg');
-      const bumpMap = textureLoader.load('https://threejs.org/examples/textures/planets/earth_normal_2048.jpg');
-      const specularMap = textureLoader.load('https://threejs.org/examples/textures/planets/earth_specular_2048.jpg');
-      earthMaterial = new THREE.MeshPhongMaterial({
-        map: colorMap,
-        bumpMap: bumpMap,
-        bumpScale: 0.05,
-        specularMap: specularMap,
-        specular: new THREE.Color('grey'),
-        shininess: 5
-      });
-    } catch (e) {
-      // Fallback פשוט יותר אם הטקסטורות לא נטענות
-      earthMaterial = new THREE.MeshStandardMaterial({
-        color: 0x2a6f8f,
-        roughness: 0.5,
-        metalness: 0.1,
-        emissive: 0x0a2a3a,
-        emissiveIntensity: 0.2
-      });
-    }
-    
-    const earth = new THREE.Mesh(geometry, earthMaterial);
-    scene.add(earth);
-    
-    // שכבת עננים (Clouds)
-    const cloudGeometry = new THREE.SphereGeometry(5.02, 128, 128);
-    const cloudTexture = textureLoader.load('https://threejs.org/examples/textures/planets/earth_clouds_1024.png');
-    const cloudMaterial = new THREE.MeshPhongMaterial({
-      map: cloudTexture,
-      transparent: true,
-      opacity: 0.15,
-      blending: THREE.AdditiveBlending
+    const earthMaterial = new THREE.MeshPhongMaterial({
+      map: textureLoader.load('https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg'),
+      bumpMap: textureLoader.load('https://threejs.org/examples/textures/planets/earth_normal_2048.jpg'),
+      bumpScale: 0.05,
+      specularMap: textureLoader.load('https://threejs.org/examples/textures/planets/earth_specular_2048.jpg'),
+      specular: new THREE.Color('grey'),
+      shininess: 5,
     });
-    const clouds = new THREE.Mesh(cloudGeometry, cloudMaterial);
+    const earth = new THREE.Mesh(new THREE.SphereGeometry(5, 128, 128), earthMaterial);
+    scene.add(earth);
+
+    const cloudMaterial = new THREE.MeshPhongMaterial({
+      map: textureLoader.load('https://threejs.org/examples/textures/planets/earth_clouds_1024.png'),
+      transparent: true, opacity: 0.15, blending: THREE.AdditiveBlending,
+    });
+    const clouds = new THREE.Mesh(new THREE.SphereGeometry(5.02, 128, 128), cloudMaterial);
     scene.add(clouds);
-    
-    // כוכבים (Particle System)
-    const starGeometry = new THREE.BufferGeometry();
-    const starCount = 4000;
-    const starPositions = new Float32Array(starCount * 3);
-    for (let i = 0; i < starCount; i++) {
-      // פיזור כוכבים בכדור גדול מסביב
-      const radius = 400 + Math.random() * 100;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      starPositions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
-      starPositions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
-      starPositions[i * 3 + 2] = radius * Math.cos(phi);
+
+    // Atmosphere halo.
+    const atmos = new THREE.Mesh(
+      new THREE.SphereGeometry(5.2, 64, 64),
+      new THREE.MeshBasicMaterial({ color: 0x4a9eff, transparent: true, opacity: 0.08, side: THREE.BackSide }),
+    );
+    scene.add(atmos);
+
+    // Stars
+    const starGeo = new THREE.BufferGeometry();
+    const starPos = new Float32Array(4000 * 3);
+    for (let i = 0; i < 4000; i++) {
+      const r = 400 + Math.random() * 100;
+      const th = Math.random() * Math.PI * 2;
+      const ph = Math.acos(2 * Math.random() - 1);
+      starPos[i * 3]     = r * Math.sin(ph) * Math.cos(th);
+      starPos[i * 3 + 1] = r * Math.sin(ph) * Math.sin(th);
+      starPos[i * 3 + 2] = r * Math.cos(ph);
     }
-    starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-    const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.35, transparent: true, opacity: 0.8 });
-    const stars = new THREE.Points(starGeometry, starMaterial);
-    scene.add(stars);
-    
-    // שכבת כוכבים נוספת קטנה ורחוקה (עומק)
-    const starGeometry2 = new THREE.BufferGeometry();
-    const starCount2 = 2000;
-    const starPositions2 = new Float32Array(starCount2 * 3);
-    for (let i = 0; i < starCount2; i++) {
-      starPositions2[i * 3] = (Math.random() - 0.5) * 800;
-      starPositions2[i * 3 + 1] = (Math.random() - 0.5) * 800;
-      starPositions2[i * 3 + 2] = (Math.random() - 0.5) * 400 - 150;
-    }
-    starGeometry2.setAttribute('position', new THREE.BufferAttribute(starPositions2, 3));
-    const starMaterial2 = new THREE.PointsMaterial({ color: 0xaaccff, size: 0.2 });
-    const stars2 = new THREE.Points(starGeometry2, starMaterial2);
-    scene.add(stars2);
-    
-    // Lights
-    const ambientLight = new THREE.AmbientLight(0x404060);
-    scene.add(ambientLight);
-    
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.35, transparent: true, opacity: 0.8 })));
+
+    scene.add(new THREE.AmbientLight(0x404060));
     const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
     mainLight.position.set(10, 15, 5);
     scene.add(mainLight);
-    
     const fillLight = new THREE.PointLight(0x4466cc, 0.5);
     fillLight.position.set(-5, 0, -8);
     scene.add(fillLight);
-    
-    const backLight = new THREE.PointLight(0xffaa66, 0.3);
-    backLight.position.set(0, 5, -12);
-    scene.add(backLight);
-    
-    // אור רקע רך
-    const rimLight = new THREE.PointLight(0x88aaff, 0.4);
-    rimLight.position.set(5, 3, -10);
-    scene.add(rimLight);
-    
-    // ---------- Markers for aircraft (3D models simplified) ----------
-    const markers = [];
-    
-    const latLonToVector3 = (lat, lon, radius = 5.05) => {
-      const phi = (90 - lat) * Math.PI / 180;
-      const theta = lon * Math.PI / 180;
-      return new THREE.Vector3(
-        radius * Math.sin(phi) * Math.cos(theta),
-        radius * Math.cos(phi),
-        radius * Math.sin(phi) * Math.sin(theta)
-      );
-    };
-    
-    const createAircraftMarker = (threatLevel) => {
-      const color = SEV[threatLevel] || '#00d9f7';
-      const group = new THREE.Group();
-      
-      // גוף המטוס
-      const bodyGeo = new THREE.BoxGeometry(0.14, 0.05, 0.32);
-      const bodyMat = new THREE.MeshStandardMaterial({ color: color, emissive: threatLevel === 'under_attack' ? 0x441111 : 0x000000, emissiveIntensity: 0.3 });
-      const body = new THREE.Mesh(bodyGeo, bodyMat);
-      body.castShadow = true;
-      group.add(body);
-      
-      // כנפיים
-      const wingGeo = new THREE.BoxGeometry(0.28, 0.02, 0.08);
-      const wingMat = new THREE.MeshStandardMaterial({ color: color });
-      const wings = new THREE.Mesh(wingGeo, wingMat);
-      wings.position.set(0, 0, -0.05);
-      group.add(wings);
-      
-      // זנב
-      const tailGeo = new THREE.ConeGeometry(0.06, 0.1, 4);
-      const tailMat = new THREE.MeshStandardMaterial({ color: color });
-      const tail = new THREE.Mesh(tailGeo, tailMat);
-      tail.position.set(0, 0.04, -0.14);
-      group.add(tail);
-      
-      // אפקט זוהר למטוסים תחת תקיפה
-      if (threatLevel === 'under_attack' || threatLevel === 'critical') {
-        const glowGeo = new THREE.SphereGeometry(0.12, 8, 8);
-        const glowMat = new THREE.MeshBasicMaterial({ color: 0xff3300, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending });
-        const glow = new THREE.Mesh(glowGeo, glowMat);
-        group.add(glow);
-      }
-      
-      return group;
-    };
-    
-    const addMarkers = () => {
-      // מסיר קודמים
-      markers.forEach(m => scene.remove(m));
-      markers.length = 0;
-      
-      const aircrafts = (assets || []).filter(a => a.asset_type === 'aircraft' && a.latitude && a.longitude);
-      aircrafts.forEach(plane => {
-        const pos = latLonToVector3(plane.latitude, plane.longitude);
-        const marker = createAircraftMarker(plane.threat_level);
-        marker.position.copy(pos);
-        // מכוון את המטוס לכיוון התעופה ( tangent to sphere)
-        marker.lookAt(pos.clone().multiplyScalar(2));
-        scene.add(marker);
-        markers.push(marker);
-      });
-    };
-    
-    addMarkers();
-    
-    // עדכון אוטומטי של מיקומי מטוסים (אם יש תנועה)
-    let frame = 0;
+
+    let rafId;
     const animate = () => {
-      frame++;
-      controls.update(); // מעדכן סיבוב אוטומטי
-      
-      // סיבוב עננים לאט
+      controls.update();
       clouds.rotation.y += 0.0005;
-      
-      // הנפשה קלה של המטוסים: תנועה למעלה/למטה + סיבוב
-      markers.forEach((marker, idx) => {
-        marker.position.y += Math.sin(Date.now() * 0.002 + idx) * 0.002;
-        marker.rotation.z += 0.01;
-        marker.rotation.x += 0.005;
-        // הבהוב קל של צבע למטוסים תחת תקיפה
-        if (marker.children[0]?.material?.emissiveIntensity) {
-          const intensity = 0.2 + Math.sin(Date.now() * 0.01) * 0.15;
-          marker.children[0].material.emissiveIntensity = intensity;
-        }
+      const t = Date.now();
+      markersRef.current.forEach((m) => {
+        const glow = m.children.find(c => c.userData?.isGlow);
+        if (glow) glow.material.opacity = 0.25 + Math.sin(t * 0.006) * 0.2;
       });
-      
       renderer.render(scene, camera);
-      animationId.current = requestAnimationFrame(animate);
+      rafId = requestAnimationFrame(animate);
     };
-    
     animate();
-    
-    const handleResize = () => {
-      const width = containerRef.current.clientWidth;
-      const height = containerRef.current.clientHeight;
-      camera.aspect = width / height;
+
+    const onResize = () => {
+      if (!container) return;
+      camera.aspect = container.clientWidth / container.clientHeight;
       camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
+      renderer.setSize(container.clientWidth, container.clientHeight);
     };
-    
-    window.addEventListener('resize', handleResize);
-    handleResize();
-    
+    window.addEventListener('resize', onResize);
+    onResize();
+
+    sceneRef.current = { scene, camera, renderer, controls };
+
     return () => {
-      cancelAnimationFrame(animationId.current);
-      window.removeEventListener('resize', handleResize);
+      cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', onResize);
+      controls.dispose();
       renderer.dispose();
-      if (containerRef.current) containerRef.current.innerHTML = '';
+      if (container && renderer.domElement.parentNode === container) {
+        container.removeChild(renderer.domElement);
+      }
+      markersRef.current.clear();
+      sceneRef.current = null;
     };
+  }, []);
+
+  // Sync markers with assets whenever the list changes.
+  useEffect(() => {
+    const ref = sceneRef.current;
+    if (!ref) return;
+    const { scene } = ref;
+    const live = new Map();
+    (assets || [])
+      .filter(a => a.asset_type === 'aircraft' && a.latitude != null && a.longitude != null)
+      .forEach(a => live.set(a.id, a));
+
+    // Remove stale markers.
+    markersRef.current.forEach((marker, id) => {
+      if (!live.has(id)) {
+        scene.remove(marker);
+        markersRef.current.delete(id);
+      }
+    });
+
+    // Add or update.
+    live.forEach((a) => {
+      const pos = latLonToVector3(a.latitude, a.longitude);
+      let marker = markersRef.current.get(a.id);
+      if (!marker || marker.userData.threatLevel !== a.threat_level) {
+        if (marker) scene.remove(marker);
+        marker = buildAircraftMarker(a.threat_level);
+        scene.add(marker);
+        markersRef.current.set(a.id, marker);
+      }
+      marker.position.copy(pos);
+      marker.lookAt(pos.clone().multiplyScalar(2));
+    });
   }, [assets]);
-  
+
   if (error) {
     return (
       <div className="panel flex items-center justify-center" style={{ height: 'calc(100vh - 120px)' }}>
         <div className="text-center text-gray-400">
-          <i className="fas fa-globe-americas text-4xl mb-3 block"></i>
-          <p className="text-sm">Unable to load 3D Globe. Check your internet connection.</p>
-          <button 
-            onClick={() => window.location.reload()} 
-            className="mt-3 text-xs bg-s-accent/20 px-3 py-1 rounded"
-          >
-            Retry
-          </button>
+          <i className="fas fa-globe-americas text-4xl mb-3 block" />
+          <p className="text-sm">Unable to load 3D Globe.</p>
         </div>
       </div>
     );
   }
-  
-  return <div ref={containerRef} className="w-full h-full rounded-2xl overflow-hidden" style={{ height: 'calc(100vh - 120px)' }} />;
+
+  return <div ref={containerRef} className="w-full rounded-2xl overflow-hidden panel" style={{ height: 'calc(100vh - 120px)' }} />;
 };
 
 // ========== 14. VOICE ALERT ==========
@@ -876,23 +982,35 @@ const useTheme = () => {
   return [theme, setTheme];
 };
 
-// ========== 19. TELEMETRY ==========
-const useTelemetry = (initialAssets) => {
+// ========== 19. LIVE TELEMETRY (WS-driven) ==========
+// Merges real-time simulator `asset:position` events into the asset list and
+// patches `asset:threat_level` transitions in place. No random jitter — if
+// there's no backend event, the data stays put.
+const useTelemetry = (initialAssets, on) => {
   const [assets, setAssets] = useState(initialAssets);
+  useEffect(() => { setAssets(initialAssets); }, [initialAssets]);
+
   useEffect(() => {
-    setAssets(initialAssets);
-  }, [initialAssets]);
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setAssets(prev => prev.map(a => {
-        if (a.asset_type !== 'aircraft' || !a.latitude) return a;
-        const newLat = a.latitude + (Math.random() - 0.5) * 0.02;
-        const newLon = a.longitude + (Math.random() - 0.5) * 0.02;
-        return { ...a, latitude: newLat, longitude: newLon, last_contact: new Date().toISOString() };
-      }));
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
+    if (!on) return;
+    const unsubPos = on('asset:position', (p) => {
+      setAssets(prev => prev.map(a => (a.id === p.asset_id ? {
+        ...a,
+        latitude: p.lat,
+        longitude: p.lon,
+        altitude_ft: p.altitude_ft,
+        heading: p.heading,
+        speed_kts: p.speed_kts,
+        last_contact: new Date().toISOString(),
+        _route: { from: p.from, to: p.to, progress: p.progress },
+      } : a)));
+    });
+    const unsubLvl = on('asset:threat_level', (p) => {
+      setAssets(prev => prev.map(a => (a.id === p.asset_id
+        ? { ...a, threat_level: p.threat_level } : a)));
+    });
+    return () => { unsubPos(); unsubLvl(); };
+  }, [on]);
+
   return assets;
 };
 
@@ -922,8 +1040,8 @@ const LoginPage = () => {
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4" style={{ background: 'linear-gradient(135deg,#00d9f722,#8b5cf622)', border: '1px solid #00d9f744' }}>
-            <i className="fas fa-shield-halved text-2xl" style={{ color: '#00d9f7' }} />
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4" style={{ background: 'linear-gradient(135deg,#d9770622,#52525b22)', border: '1px solid #d9770644' }}>
+            <i className="fas fa-shield-halved text-2xl" style={{ color: '#d97706' }} />
           </div>
           <h1 className="font-display text-3xl font-bold text-gradient">SHADOW NDR</h1>
           <p className="text-xs mono text-gray-600 tracking-widest mt-1">MULTI-TENANT APEX v2.0</p>
@@ -933,7 +1051,7 @@ const LoginPage = () => {
             <div><label className="text-xs mono text-gray-500 uppercase tracking-widest block mb-1.5">Username</label><input value={u} onChange={e => setU(e.target.value)} className="w-full bg-s-void border border-s-border rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-s-accent/60 transition-colors" /></div>
             <div><label className="text-xs mono text-gray-500 uppercase tracking-widest block mb-1.5">Password</label><input type="password" value={p} onChange={e => setP(e.target.value)} className="w-full bg-s-void border border-s-border rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-s-accent/60 transition-colors" /></div>
             {err && <div className="text-xs text-s-danger mono">{err}</div>}
-            <button type="submit" disabled={loading} className="w-full py-2.5 rounded-lg text-sm font-body font-medium transition-all" style={{ background: 'linear-gradient(135deg,#00d9f720,#8b5cf620)', border: '1px solid #00d9f744', color: '#00d9f7' }}>{loading ? 'Authenticating...' : 'Authenticate →'}</button>
+            <button type="submit" disabled={loading} className="w-full py-2.5 rounded-lg text-sm font-body font-medium transition-all" style={{ background: 'linear-gradient(135deg,#d9770620,#52525b20)', border: '1px solid #d9770644', color: '#d97706' }}>{loading ? 'Authenticating...' : 'Authenticate →'}</button>
           </form>
           <div className="mt-6 border-t border-s-border pt-5">
             <p className="text-[10px] mono text-gray-600 mb-3 uppercase tracking-widest">Demo tenants</p>
@@ -945,10 +1063,47 @@ const LoginPage = () => {
   );
 };
 
+// ========== 21.5. CRITICAL ATTACK BANNER ==========
+// Prominent top banner surfaces in-flight attacks. Pulses red, lists the ICAO24
+// codes under attack, and click jumps to the live map.
+const CriticalBanner = ({ assets, onJumpToMap }) => {
+  const under = useMemo(() => (assets || []).filter(a =>
+    a.threat_level === 'under_attack' || a.threat_level === 'critical'), [assets]);
+  if (!under.length) return null;
+  const ids = under.map(a => a.icao24 || a.name).slice(0, 6).join(' · ');
+  return (
+    <motion.div
+      initial={{ y: -40, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+      className="relative overflow-hidden rounded-xl mb-4 cursor-pointer"
+      onClick={onJumpToMap}
+      style={{
+        background: 'linear-gradient(90deg, rgba(185,28,28,0.2), rgba(185,28,28,0.08))',
+        border: '1px solid rgba(185,28,28,0.55)',
+        boxShadow: '0 0 24px rgba(185,28,28,0.25), inset 0 0 24px rgba(185,28,28,0.1)',
+      }}>
+      <div className="absolute inset-0 pointer-events-none"
+        style={{ background: 'linear-gradient(90deg, transparent, rgba(185,28,28,0.35), transparent)',
+                 animation: 'sweep 2.4s linear infinite' }} />
+      <div className="relative flex items-center gap-3 px-4 py-2.5">
+        <motion.i className="fas fa-triangle-exclamation"
+          animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 1, repeat: Infinity }}
+          style={{ color: '#ef4444', fontSize: 18 }} />
+        <div className="flex-1 min-w-0">
+          <div className="font-display font-bold text-sm text-white tracking-wide">
+            {under.length} AIRCRAFT UNDER ATTACK
+          </div>
+          <div className="mono text-[10px] text-gray-300 truncate">{ids}</div>
+        </div>
+        <span className="mono text-[10px] text-s-danger opacity-80">VIEW LIVE MAP →</span>
+      </div>
+    </motion.div>
+  );
+};
+
 // ========== 22. MAIN APP ==========
 const Main = () => {
   const { user, logout } = useAuth();
-  const { status: wsStatus, events } = useWebSocket();
+  const { status: wsStatus, events, on: wsOn } = useWebSocket();
   const speak = useVoiceAlert();
   const [theme, setTheme] = useTheme();
   const [page, setPage] = useState('dashboard');
@@ -966,14 +1121,21 @@ const Main = () => {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try {
-      const [d, a, th, al, rp] = await Promise.all([api.getDashboard(), api.getAssets(), api.getThreats(), api.getAlerts(), api.getReports()]);
-      setAssets(a.data || []);
-      setDashData(d.data);
-      setThreats(th.data || []);
-      setAlerts(al.data || []);
-      setReports(rp.data || []);
-    } catch (e) { console.error('Load error:', e); }
+    const results = await Promise.allSettled([
+      api.getDashboard(),
+      api.getAssets(),
+      api.getThreats(),
+      api.getAlerts(),
+      api.getReports(),
+    ]);
+    const pick = (i) => results[i].status === 'fulfilled' ? results[i].value : null;
+    const d = pick(0), a = pick(1), th = pick(2), al = pick(3), rp = pick(4);
+    if (d?.data) setDashData(d.data);
+    setAssets(a?.data || []);
+    setThreats(th?.data || []);
+    setAlerts(al?.data || []);
+    setReports(rp?.data || []);
+    results.forEach((r, i) => { if (r.status === 'rejected') console.warn(`load[${i}] failed:`, r.reason?.response?.data || r.reason?.message); });
     setLoading(false);
   }, []);
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
@@ -992,22 +1154,35 @@ const Main = () => {
   }
 };
 
-  const liveAssets = useTelemetry(assets);
+  const liveAssets = useTelemetry(assets, wsOn);
   const displayAssets = filteredAssets ?? liveAssets;
 
   useEffect(() => {
-    events.slice(0, 3).forEach(ev => {
-      const threat = ev.data;
-      const toast = { id: Date.now(), event: ev.event, message: threat?.threat_type || 'New alert', severity: threat?.severity || 'info' };
+    if (!wsOn) return;
+    const pushToast = (evt, threat, sev) => {
+      const id = `${evt}-${threat?.id || Date.now()}-${Math.random()}`;
+      const msg = evt === 'threat:resolved'
+        ? `✓ ${threat?.threat_type || 'threat'} cleared${threat?.icao24 ? ` on ${threat.icao24}` : ''}`
+        : `${threat?.threat_type || 'alert'}${threat?.icao24 ? ` · ${threat.icao24}` : ''}`;
+      const toast = { id, event: evt, message: msg, severity: sev };
       setToasts(prev => [toast, ...prev].slice(0, 5));
-      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== toast.id)), 6000);
-      if (threat?.severity === 'emergency') {
-        speak(`Emergency: ${threat.threat_type} on ${threat.aircraft_name || 'aircraft'}`);
-        notify('Shadow NDR Alert', { body: `${threat.threat_type} – ${threat.description?.slice(0, 100)}`, icon: '/favicon.ico' });
+      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 6000);
+    };
+    const unsubNew = wsOn('threat:new', (t) => {
+      pushToast('threat:new', t, t?.severity || 'high');
+      if (t?.severity === 'emergency' || t?.severity === 'critical') {
+        speak(`${t.severity}: ${t.threat_type} on ${t.icao24 || 'aircraft'}`);
+        notify('Shadow NDR Alert', { body: `${t.threat_type} – ${t.description?.slice(0, 100) || ''}`, icon: '/favicon.ico' });
       }
-      if (ev.event === 'new_threat') load();
+      load();
     });
-  }, [events, speak, load]);
+    const unsubRes = wsOn('threat:resolved', (t) => {
+      pushToast('threat:resolved', t, 'low');
+      load();
+    });
+    const unsubAlert = wsOn('new_alert', (a) => pushToast('new_alert', a, a?.severity || 'high'));
+    return () => { unsubNew(); unsubRes(); unsubAlert(); };
+  }, [wsOn, speak, load]);
 
   const unacked = useMemo(() => alerts.filter(a => !a.acknowledged).length, [alerts]);
 
@@ -1027,7 +1202,7 @@ const Main = () => {
   if (loading && !dashData) return <div className="flex items-center justify-center min-h-screen flex-col gap-4"><div className="w-10 h-10 rounded-full border-2 border-s-accent border-t-transparent animate-spin" /><div className="mono text-s-accent text-xs tracking-widest animate-pulse">LOADING SHADOW NDR...</div></div>;
 
   return (
-    <div className="min-h-screen flex" data-theme={theme}>
+    <div className="min-h-screen flex scanlines overflow-hidden" data-theme={theme}>
       <Sidebar page={page} setPage={setPage} user={user} logout={logout} unacked={unacked} />
       <ToastContainer toasts={toasts} onDismiss={id => setToasts(p => p.filter(t => t.id !== id))} />
       <CopilotChat 
@@ -1041,16 +1216,25 @@ const Main = () => {
         <div className="flex items-center justify-between mb-6">
           <div><h1 className="font-display font-bold text-xl text-gradient">{NAV.find(n => n.id === page)?.label || page}</h1><div className="text-[10px] mono text-gray-600 mt-0.5">{user?.tenant_name} · {new Date().toLocaleTimeString()}</div></div>
           <div className="flex items-center gap-3">
-            <button onClick={() => setTheme(theme === 'dark' ? 'neon' : 'dark')} className="text-[10px] mono px-2.5 py-1.5 rounded-lg border border-s-border hover:border-s-accent/40"><i className={`fas fa-${theme === 'dark' ? 'sun' : 'moon'} mr-1`} />{theme === 'dark' ? 'Neon' : 'Dark'}</button>
-            <button onClick={handleExportPDF} className="text-[10px] mono px-2.5 py-1.5 rounded-lg border border-s-border hover:border-s-accent/40"><i className="fas fa-file-pdf mr-1" />Export PDF</button>
-            <button onClick={load} className="text-[10px] mono px-2.5 py-1.5 rounded-lg border border-s-border hover:border-s-accent/40"><i className="fas fa-rotate-right mr-1" />Refresh</button>
-            <div className={`flex items-center gap-1.5 text-[10px] mono ${wsStatus === 'connected' ? 'text-s-ok' : wsStatus === 'reconnecting' ? 'text-s-warn' : 'text-s-danger'}`}><div className="w-1.5 h-1.5 rounded-full" style={{ background: wsStatus === 'connected' ? '#00e87a' : wsStatus === 'reconnecting' ? '#ff7b00' : '#ff1f4c' }} />{wsStatus.toUpperCase()}</div>
+            <button onClick={handleExportPDF} className="text-[10px] mono px-3 py-1.5 rounded-sm border border-[#27272a] text-[#71717a] hover:bg-[#1c1c20] hover:text-[#e4e4e7] uppercase transition-all flex items-center gap-2">
+              <i className="fas fa-file-pdf text-[9px]" /> 
+              <span>Export_PDF</span>
+            </button>
+            <button onClick={load} className="text-[10px] mono px-3 py-1.5 rounded-sm border border-[#27272a] text-[#71717a] hover:bg-[#1c1c20] hover:text-[#e4e4e7] uppercase transition-all flex items-center gap-2">
+              <i className="fas fa-rotate-right text-[9px]" />
+              <span>Sync_Data</span>
+            </button>
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-sm bg-[#101012] border border-[#27272a] text-[9px] mono tracking-widest ${wsStatus === 'connected' ? 'text-[#10b981]' : wsStatus === 'reconnecting' ? 'text-[#d97706]' : 'text-[#ef4444]'}`}>
+              <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: wsStatus === 'connected' ? '#10b981' : wsStatus === 'reconnecting' ? '#d97706' : '#b91c1c' }} />
+              {wsStatus.toUpperCase()}_LINK
+            </div>
           </div>
         </div>
+        <CriticalBanner assets={displayAssets} onJumpToMap={() => setPage('map')} />
         <AnimatePresence mode="wait">
           <motion.div key={page} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: .2 }}>
             {page === 'dashboard' && <><Dashboard data={dashData} /><ForecastChart timeline={dashData?.timeline} /></>}
-            {page === 'map' && (<div><div className="flex justify-end mb-2 gap-2"><button onClick={() => setShow3D(false)} className={`text-[10px] mono px-3 py-1 rounded-lg ${!show3D ? 'bg-s-accent/20 text-s-accent' : 'bg-s-void text-gray-500'}`}>2D Map</button><button onClick={() => setShow3D(true)} className={`text-[10px] mono px-3 py-1 rounded-lg ${show3D ? 'bg-s-accent/20 text-s-accent' : 'bg-s-void text-gray-500'}`}>3D Globe</button></div>{show3D ? <Globe3D assets={displayAssets} /> : <LiveMap assets={displayAssets} />}</div>)}
+            {page === 'map' && (<div><div className="flex justify-end mb-2 gap-2"><button onClick={() => setShow3D(false)} className={`text-[10px] mono px-3 py-1 rounded-sm border ${!show3D ? 'border-[#d97706] text-[#d97706] bg-[#d9770610]' : 'border-[#27272a] text-[#52525b] hover:text-[#a1a1aa]'}`}>[ 2D_RADAR ]</button><button onClick={() => setShow3D(true)} className={`text-[10px] mono px-3 py-1 rounded-sm border ${show3D ? 'border-[#d97706] text-[#d97706] bg-[#d9770610]' : 'border-[#27272a] text-[#52525b] hover:text-[#a1a1aa]'}`}>[ 3D_GLOBE ]</button></div>{show3D ? <Globe3D assets={displayAssets} /> : <LiveMap assets={displayAssets} />}</div>)}
             {page === 'assets' && <AssetsPage assets={displayAssets} user={user} selectedAsset={selectedAsset} onClearSelected={handleClearSelected} />}
             {page === 'threats' && <ThreatsPage threats={threats} onUpdateStatus={async (id, status) => { await api.updateThreat(id, { status }); load(); }} />}
             {page === 'alerts' && <AlertsPage alerts={alerts} onAck={async (id) => { await api.ackAlert(id); load(); }} />}

@@ -455,7 +455,7 @@ type MLClient struct {
 }
 
 // AnalyzeRequest defines the input features for anomaly detection.
-// Includes full railway + aviation feature set.
+// Includes full aviation feature set.
 type AnalyzeRequest struct {
 	// Core
 	Size         float64 `json:"size"`

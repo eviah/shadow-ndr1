@@ -1,7 +1,7 @@
 # Shadow NDR - Installation Guide
 
 ## Project Overview
-Shadow NDR is a railway cybersecurity system with components in Rust, Python, Go, and TypeScript.
+Shadow NDR is an aviation cybersecurity system with components in Rust, Python, Go, and TypeScript.
 
 ## ✅ Completed Installations
 
@@ -13,7 +13,7 @@ Shadow NDR is a railway cybersecurity system with components in Rust, Python, Go
 - **Features**: 
   - IEC 104 protocol parser (45 type IDs)
   - Streaming parser with buffer pooling
-  - Railway criticality detection
+  - Aviation safety criticality detection
   - Zero-copy parsing with nom
 
 Build command:

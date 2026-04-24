@@ -43,3 +43,11 @@ export const getAlerts     = ()     => api.get('/alerts');
 export const ackAlert      = (id)   => api.post(`/alerts/${id}/acknowledge`);
 export const getReports    = ()     => api.get('/reports');
 export const getReport     = (id)   => api.get(`/reports/${id}`);
+
+// ── Simulator control ────────────────────────────────────────────────────────
+export const getAirports       = ()                  => api.get('/simulator/airports');
+export const getFlights        = ()                  => api.get('/simulator/flights');
+export const getFlight         = (id)                => api.get(`/simulator/flights/${id}`);
+export const pauseFlight       = (id, paused)        => api.post(`/simulator/flights/${id}/pause`, { paused });
+export const rerouteFlight     = (id, from, to)      => api.post(`/simulator/flights/${id}/route`, { from, to });
+export const injectAttack      = (id, opts = {})     => api.post(`/simulator/flights/${id}/attack`, opts);

@@ -149,11 +149,12 @@ async def get_asset_risk(ip: str, org_id: str) -> float:
 # =============================================================================
 
 class AssetType(str, Enum):
-    TRAIN = "train"
-    SIGNALING = "signaling"
-    SWITCH = "switch"
-    POWER = "power"
-    UNKNOWN = "unknown"
+    AIRCRAFT = "aircraft"
+    AIRPORT  = "airport"
+    ATC      = "atc"          # air-traffic-control equipment
+    RADAR    = "radar"
+    SWITCH   = "switch"
+    UNKNOWN  = "unknown"
 
 @router.get("")
 @limiter.limit("100/minute")
@@ -162,7 +163,7 @@ async def get_assets(
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     asset_type: Optional[AssetType] = None,
-    train_id: Optional[str] = None,
+    icao24: Optional[str] = None,
     min_risk: Optional[float] = Query(None, ge=0, le=1),
     last_seen_after: Optional[datetime] = None,
     sort_by: str = Query("last_seen", regex="^(last_seen|risk|ip)$"),
@@ -170,15 +171,18 @@ async def get_assets(
     user = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """
-    Get list of assets with filtering, sorting, and AI enrichment.
+    Get list of aviation assets (aircraft, airports, ATC, radar) with
+    filtering, sorting, and AI enrichment.
     """
     start_time = time.time()
     try:
         org_id = user["org_id"]
 
-        # Build PostgreSQL query
+        # The underlying table still carries legacy `is_train` / `train_id` columns
+        # for back-compat; we surface them as `is_aircraft` / `icao24` at the API.
         query = """
-            SELECT ip, hostname, os_guess, open_ports, first_seen, last_seen, is_train, train_id
+            SELECT ip, hostname, os_guess, open_ports, first_seen, last_seen,
+                   is_train AS is_aircraft, train_id AS icao24
             FROM assets
             WHERE org_id = $1
         """
@@ -186,18 +190,18 @@ async def get_assets(
         param_idx = 2
 
         if asset_type:
-            if asset_type == AssetType.TRAIN:
+            if asset_type == AssetType.AIRCRAFT:
                 query += " AND is_train = true"
-            elif asset_type == AssetType.SIGNALING:
-                query += " AND (open_ports @> ARRAY[2404, 502] OR os_guess ILIKE '%signaling%')"
+            elif asset_type == AssetType.ATC:
+                query += " AND (open_ports @> ARRAY[2404, 502] OR os_guess ILIKE '%atc%')"
             elif asset_type == AssetType.SWITCH:
                 query += " AND (open_ports @> ARRAY[20000, 20004] OR os_guess ILIKE '%switch%')"
-            elif asset_type == AssetType.POWER:
-                query += " AND (open_ports @> ARRAY[502, 2404] OR os_guess ILIKE '%power%')"
+            elif asset_type == AssetType.RADAR:
+                query += " AND (open_ports @> ARRAY[502, 2404] OR os_guess ILIKE '%radar%')"
 
-        if train_id:
+        if icao24:
             query += f" AND train_id = ${param_idx}"
-            params.append(train_id)
+            params.append(icao24)
             param_idx += 1
 
         if last_seen_after:
@@ -230,8 +234,8 @@ async def get_assets(
                 "open_ports": row["open_ports"] if isinstance(row["open_ports"], list) else [],
                 "first_seen": row["first_seen"].isoformat() if row["first_seen"] else None,
                 "last_seen": row["last_seen"].isoformat() if row["last_seen"] else None,
-                "is_train": row["is_train"],
-                "train_id": row["train_id"],
+                "is_aircraft": row["is_aircraft"],
+                "icao24": row["icao24"],
             }
 
             # Get risk score
@@ -241,10 +245,10 @@ async def get_assets(
             # Enrich with AI classification
             if asset_type is None:
                 # Auto-classify if not specified
-                if asset["is_train"]:
-                    asset["asset_type"] = "train"
+                if asset["is_aircraft"]:
+                    asset["asset_type"] = "aircraft"
                 elif 2404 in asset["open_ports"] or 502 in asset["open_ports"]:
-                    asset["asset_type"] = "signaling"
+                    asset["asset_type"] = "atc"
                 elif 20000 in asset["open_ports"] or 20004 in asset["open_ports"]:
                     asset["asset_type"] = "switch"
                 else:
@@ -271,7 +275,7 @@ async def get_assets(
             assets[i] = await enrich_asset(asset)
 
         # Cache result (short TTL)
-        cache_key = f"assets:{org_id}:{limit}:{offset}:{asset_type}:{train_id}:{min_risk}:{last_seen_after}:{sort_by}:{sort_order}"
+        cache_key = f"assets:{org_id}:{limit}:{offset}:{asset_type}:{icao24}:{min_risk}:{last_seen_after}:{sort_by}:{sort_order}"
         await _set_cache(cache_key, {"total": total_count, "assets": assets}, ttl=10)
 
         return {
@@ -306,7 +310,8 @@ async def get_asset(
         async with db.pg.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT ip, hostname, os_guess, open_ports, first_seen, last_seen, is_train, train_id
+                SELECT ip, hostname, os_guess, open_ports, first_seen, last_seen,
+                       is_train AS is_aircraft, train_id AS icao24
                 FROM assets
                 WHERE ip = $1 AND org_id = $2
                 """,
@@ -323,8 +328,8 @@ async def get_asset(
             "open_ports": row["open_ports"] if isinstance(row["open_ports"], list) else [],
             "first_seen": row["first_seen"].isoformat() if row["first_seen"] else None,
             "last_seen": row["last_seen"].isoformat() if row["last_seen"] else None,
-            "is_train": row["is_train"],
-            "train_id": row["train_id"],
+            "is_aircraft": row["is_aircraft"],
+            "icao24": row["icao24"],
         }
 
         # Risk score
@@ -332,10 +337,10 @@ async def get_asset(
         asset["risk_score"] = risk
 
         # Auto-classify
-        if asset["is_train"]:
-            asset["asset_type"] = "train"
+        if asset["is_aircraft"]:
+            asset["asset_type"] = "aircraft"
         elif 2404 in asset["open_ports"] or 502 in asset["open_ports"]:
-            asset["asset_type"] = "signaling"
+            asset["asset_type"] = "atc"
         elif 20000 in asset["open_ports"] or 20004 in asset["open_ports"]:
             asset["asset_type"] = "switch"
         else:
