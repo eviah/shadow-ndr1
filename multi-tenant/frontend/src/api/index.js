@@ -36,6 +36,8 @@ export const getMe         = ()     => api.get('/auth/me');
 export const getDashboard  = ()     => api.get('/dashboard');
 export const getAssets     = ()     => api.get('/assets');
 export const getAsset      = (id)   => api.get(`/assets/${id}`);
+export const isolateAsset  = (id, isolated = true, reason = '') =>
+  api.post(`/assets/${id}/isolate`, { isolated, reason });
 export const getThreats    = (p={}) => api.get('/threats', { params:p });
 export const getThreat     = (id)   => api.get(`/threats/${id}`);
 export const updateThreat  = (id,b) => api.patch(`/threats/${id}/status`, b);

@@ -24,7 +24,7 @@ from slowapi.errors import RateLimitExceeded
 
 from .config import get_settings
 from .db import db
-from .routes import health, threats, assets, ml, auth, sensor_integration
+from .routes import health, threats, assets, ml, auth, sensor_integration, breach_horizon
 
 # =============================================================================
 # Settings
@@ -210,6 +210,7 @@ api_v1.include_router(assets.router)
 api_v1.include_router(ml.router)
 api_v1.include_router(auth.router)
 api_v1.include_router(sensor_integration.router)
+api_v1.include_router(breach_horizon.router)
 
 app.mount("/api/v1", api_v1)
 
@@ -220,6 +221,7 @@ app.include_router(assets.router)
 app.include_router(ml.router)
 app.include_router(auth.router)
 app.include_router(sensor_integration.router)
+app.include_router(breach_horizon.router)
 
 # =============================================================================
 # Root endpoint

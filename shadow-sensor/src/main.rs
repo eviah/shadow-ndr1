@@ -29,6 +29,16 @@ mod quantum_crypto;      // Post-quantum cryptography
 mod threat_hunter;       // Automated threat hunting
 mod hw_accel;           // Hardware acceleration (DPDK, AF_XDP, GPU)
 mod analytics;          // Advanced real-time analytics engine
+mod phantom_airspace;   // Honey-aircraft fleet + autonomous propagation
+mod spsc_pipe;          // Lock-free SPSC ring + mmap-backed protobuf pipeline
+mod dpi_matcher;        // SIMD Aho-Corasick multi-pattern DPI matcher
+mod flow_table;         // Lock-free sharded flow table with Arc-reclamation
+mod reassembly;         // TCP stream reassembly + IPv4 defragmentation
+mod xdp_capture;        // AF_XDP zero-copy capture (UMEM-backed software stub off-Linux)
+mod rule_jit;           // Compiled rule engine (bytecode VM, cranelift extension point)
+mod hdr_telemetry;      // HDR histogram + per-flow telemetry bundles
+mod hot_reload;         // Atomic-swap hot-reload rule engine (zero packet drop)
+mod adaptive_sampler;   // PSI-style adaptive sampling under backpressure
 
 use anyhow::Result;
 use std::sync::Arc;

@@ -26,6 +26,7 @@ import { redisService } from './services/redis.js';
 import ThreatScoring from './services/threatScoring.js';
 import { upsertActiveThreat, startSweeper } from './services/threatLifecycle.js';
 import * as simulator from './services/simulator.js';
+import { startLiveStream } from './services/livestream.js';
 
 // Route imports
 import authRoutes from './routes/auth.js';
@@ -36,6 +37,8 @@ import alertsRoutes from './routes/alerts.js';
 import reportsRoutes from './routes/reports.js';
 import healthRoutes from './routes/health.js';
 import simulatorRoutes from './routes/simulator.js';
+import webauthnRoutes from './routes/webauthn.js';
+import { requireStepUp } from './services/webauthn.js';
 
 const app = express();
 const server = createServer(app);
@@ -122,7 +125,27 @@ io.on('connection', (socket) => {
 });
 
 app.set('io', io);
-export { io };
+
+// Wire wsManager (used by routes/services) to the live socket.io instance
+// so existing wsManager.broadcastToTenant() calls actually reach clients.
+import('./services/websocket.js').then(({ wsManager }) => wsManager.bindIo(io));
+
+// Redis Pub/Sub → Socket.IO bridge so any service in the cluster can
+// publish to ndr:threats:tenant:<id> and dashboards update instantly.
+const liveStream = startLiveStream(io);
+app.set('liveStream', liveStream);
+
+// REST endpoint to fan-out a threat from anywhere (used by sensor + ML)
+app.post('/api/v1/ws/threats', express.json(), async (req, res) => {
+  const { tenant_id, event = 'threat:new', data } = req.body || {};
+  if (!tenant_id || !data) {
+    return res.status(400).json({ error: 'tenant_id and data required' });
+  }
+  await liveStream.publishThreat(tenant_id, event, data);
+  res.json({ published: true, channel: `ndr:threats:tenant:${tenant_id}` });
+});
+
+export { io, liveStream };
 
 // ========== 2. Express middleware ==========
 app.set('trust proxy', 1);
@@ -143,7 +166,24 @@ app.use('/api/threats',    apiRateLimiter, threatsRoutes);
 app.use('/api/alerts',     apiRateLimiter, alertsRoutes);
 app.use('/api/reports',    apiRateLimiter, reportsRoutes);
 app.use('/api/simulator',  apiRateLimiter, simulatorRoutes);
+app.use('/api/webauthn',   apiRateLimiter, webauthnRoutes);
 app.use('/health', healthRoutes);
+
+// FIDO2 step-up gate — destructive ops require a hardware-key assertion.
+// Applied BEFORE the regular threats router so the gate runs first.
+app.delete('/api/threats/global', requireStepUp('clear-global-threats'),
+  async (req, res) => {
+    const result = await db.query('DELETE FROM threats WHERE tenant_id = $1', [req.user.tenant_id]);
+    res.json({ deleted: result.rowCount });
+  });
+app.post('/api/alerts/critical/bulk-acknowledge', requireStepUp('bulk-ack-critical'),
+  async (req, res) => {
+    const result = await db.query(
+      `UPDATE alerts SET acknowledged = TRUE
+       WHERE tenant_id = $1 AND severity IN ('critical','emergency') AND acknowledged = FALSE`,
+      [req.user.tenant_id]);
+    res.json({ acknowledged: result.rowCount });
+  });
 
 // ========== 3. SENSOR DATA INGESTION – ULTIMATE ==========
 /**
@@ -274,7 +314,7 @@ app.post('/api/sensor/data', sensorRateLimiter, async (req, res) => {
       description,
       raw_features: { flow_id, dst_ip, src_port, dst_port, details, raw: req.body },
       mitre_technique: null,
-    });
+    }, io);
 
     // 7. Real-time broadcast — distinguish new vs update so UI can animate
     io.to(`tenant:${tenantId}`).emit(created ? 'threat:new' : 'threat:update', newThreat);

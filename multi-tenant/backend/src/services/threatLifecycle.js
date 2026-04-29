@@ -34,7 +34,7 @@ function levelFromSeverity(severity) {
 export async function upsertActiveThreat(tenantId, {
     threat_type, severity, source_ip, dest_ip, icao24, asset_id,
     score, description, raw_features, mitre_technique,
-}) {
+}, io = null) {
     const dedupeSql = `
         SELECT id FROM threats
         WHERE status = 'active'
@@ -68,7 +68,7 @@ export async function upsertActiveThreat(tenantId, {
              WHERE id = $1 RETURNING *`,
             [id, score ?? 0, severity],
         );
-        await syncAssetThreatLevel(tenantId, asset_id, icao24);
+        await syncAssetThreatLevel(tenantId, asset_id, icao24, io);
         return { threat: updated.rows[0], created: false };
     }
 

@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import re
 import time
 import warnings
 from contextlib import asynccontextmanager
@@ -67,35 +68,109 @@ db_pool_size = Gauge(
 
 class AdaptivePool:
     """
-    AI‑driven connection pool that adjusts min/max sizes based on load and latency.
-    Tracks query rate and average duration; expands pool when needed.
+    AI‑driven connection pool that adjusts min/max sizes based on load and
+    latency. Also tracks per-query latency to surface autonomous index
+    recommendations (Self-Healing #5):
+
+      • Every executed query is fingerprinted by its WHERE-clause shape.
+      • Slow fingerprints (avg > SLOW_MS, count >= MIN_SAMPLES) become
+        IndexSuggestion records with a CREATE INDEX stub the DBA can review.
+      • Suggestions appear in get_performance_advice().
     """
+
+    SLOW_MS = 250.0
+    MIN_SAMPLES = 10
+    MAX_TRACKED = 500
+    _COL_RE = re.compile(
+        r"\bWHERE\s+([\w\.]+)\s*(?:=|>|<|>=|<=|<>|!=|IN|LIKE)",
+        re.IGNORECASE,
+    )
+    _TABLE_RE = re.compile(r"\bFROM\s+([\w\.]+)", re.IGNORECASE)
+
     def __init__(self, min_size: int, max_size: int, target_usage: float = 0.7):
         self.min_size = min_size
         self.max_size = max_size
         self.target_usage = target_usage
         self._current_size = min_size
-        self._query_rate = 0.0
-        self._avg_duration = 0.0
         self._last_adjust = time.time()
         self._lock = asyncio.Lock()
+        # Query telemetry — fingerprint → {count, total_ms}
+        self._query_log: Dict[str, Dict[str, float]] = {}
 
-    async def adjust(self, current_connections: int, query_rate: float, avg_duration: float) -> None:
-        """Called periodically (e.g., every minute) to adjust pool size based on metrics."""
+    async def adjust(self, current_connections: int,
+                    query_rate: float = 0.0,
+                    avg_duration: float = 0.0) -> None:
         async with self._lock:
-            usage = current_connections / self._current_size if self._current_size > 0 else 0
+            usage = (current_connections / self._current_size
+                    if self._current_size > 0 else 0)
             if usage > self.target_usage and self._current_size < self.max_size:
                 new_size = min(self._current_size + 2, self.max_size)
-                logger.info(f"AI: Increasing pool size from {self._current_size} to {new_size} (usage={usage:.2f})")
+                logger.info(f"AI: pool {self._current_size} → {new_size} (usage={usage:.2f})")
                 self._current_size = new_size
             elif usage < self.target_usage / 2 and self._current_size > self.min_size:
                 new_size = max(self._current_size - 2, self.min_size)
-                logger.info(f"AI: Decreasing pool size from {self._current_size} to {new_size} (usage={usage:.2f})")
+                logger.info(f"AI: pool {self._current_size} → {new_size} (usage={usage:.2f})")
                 self._current_size = new_size
 
     @property
     def size(self) -> int:
         return self._current_size
+
+    # ── Query telemetry ──────────────────────────────────────────────────
+
+    @classmethod
+    def _fingerprint(cls, query: str) -> str:
+        """Strip literals + collapse whitespace so equivalent queries share a key."""
+        q = re.sub(r"'[^']*'", "?", query)
+        q = re.sub(r"\b\d+\b", "?", q)
+        q = re.sub(r"\$\d+", "?", q)
+        q = re.sub(r"\s+", " ", q).strip().lower()
+        return q[:240]
+
+    def track(self, query: str, elapsed_ms: float) -> None:
+        if not query:
+            return
+        fp = self._fingerprint(query)
+        bucket = self._query_log.get(fp)
+        if bucket is None:
+            if len(self._query_log) >= self.MAX_TRACKED:
+                # Evict the fastest-and-rarest entry
+                victim = min(self._query_log,
+                            key=lambda k: self._query_log[k]["count"])
+                self._query_log.pop(victim, None)
+            self._query_log[fp] = {"count": 0, "total_ms": 0.0}
+            bucket = self._query_log[fp]
+        bucket["count"] += 1
+        bucket["total_ms"] += elapsed_ms
+
+    def analyze_indexes(self) -> List[Dict[str, Any]]:
+        """Return CREATE INDEX recommendations for slow fingerprints."""
+        out: List[Dict[str, Any]] = []
+        for fp, stats in self._query_log.items():
+            if stats["count"] < self.MIN_SAMPLES:
+                continue
+            avg = stats["total_ms"] / stats["count"]
+            if avg < self.SLOW_MS:
+                continue
+            tbl_m = self._TABLE_RE.search(fp)
+            cols = self._COL_RE.findall(fp)
+            if not tbl_m or not cols:
+                continue
+            table = tbl_m.group(1).split(".")[-1]
+            seen = set()
+            cols = [c.split(".")[-1] for c in cols if not (c in seen or seen.add(c))]
+            idx_name = f"idx_{table}_" + "_".join(cols[:3])
+            out.append({
+                "table": table,
+                "columns": cols,
+                "avg_ms": round(avg, 1),
+                "samples": int(stats["count"]),
+                "ddl": f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {idx_name} "
+                      f"ON {table} ({', '.join(cols)});",
+                "fingerprint": fp,
+            })
+        out.sort(key=lambda r: r["avg_ms"], reverse=True)
+        return out
 
 
 # =============================================================================
@@ -235,7 +310,10 @@ class Database:
         try:
             async with self.acquire() as conn:
                 result = await conn.execute(query, *args)
-                db_query_duration.labels(db_type="postgres", operation="execute").observe(time.time() - start)
+                elapsed = time.time() - start
+                db_query_duration.labels(db_type="postgres", operation="execute").observe(elapsed)
+                if self._pg_adaptive:
+                    self._pg_adaptive.track(query, elapsed * 1000.0)
                 return result
         except Exception as e:
             db_errors_total.labels(db_type="postgres", error_type="execute").inc()
@@ -252,7 +330,10 @@ class Database:
         try:
             async with self.acquire() as conn:
                 result = await conn.fetch(query, *args)
-                db_query_duration.labels(db_type="postgres", operation="fetch").observe(time.time() - start)
+                elapsed = time.time() - start
+                db_query_duration.labels(db_type="postgres", operation="fetch").observe(elapsed)
+                if self._pg_adaptive:
+                    self._pg_adaptive.track(query, elapsed * 1000.0)
                 return result
         except Exception as e:
             db_errors_total.labels(db_type="postgres", error_type="fetch").inc()
@@ -372,12 +453,44 @@ class Database:
 
     async def get_performance_advice(self) -> Dict[str, Any]:
         """
-        AI-driven performance analysis: identifies slow queries, recommends indexes,
-        and suggests scaling changes.
+        Performance + risk analysis:
+          • slow query detector (from AdaptivePool.query_log)
+          • autonomous index suggestions
+          • per-asset Breach Horizon scores
         """
-        advice = {"postgres": [], "redis": [], "clickhouse": []}
-        # In production, we could collect query stats and use a model.
-        # For now, we return placeholder.
+        advice: Dict[str, Any] = {"postgres": [], "redis": [], "clickhouse": []}
+
+        # Index suggestions from the adaptive pool (Self-Healing #5)
+        if self._pg_adaptive and hasattr(self._pg_adaptive, "analyze_indexes"):
+            try:
+                advice["postgres"].extend(self._pg_adaptive.analyze_indexes())
+            except Exception as e:
+                logger.warning(f"index analysis failed: {e}")
+
+        # Breach Horizon scores for top-N assets (Predictive #3)
+        try:
+            from ..ml.breach_horizon import get_horizon_model
+            model = get_horizon_model()
+            await model.maybe_train(self)
+            asset_rows = await self.fetch(
+                "SELECT id FROM assets ORDER BY id LIMIT 25"
+            )
+            forecasts = []
+            for r in asset_rows:
+                f = await model.predict(self, r["id"])
+                if f.band in ("orange", "red"):
+                    forecasts.append({
+                        "asset_id": f.asset_id,
+                        "probability": f.breach_probability,
+                        "horizon_hours": f.horizon_hours,
+                        "band": f.band,
+                        "drivers": f.drivers,
+                    })
+            advice["breach_horizon"] = forecasts
+        except Exception as e:
+            logger.warning(f"breach horizon failed: {e}")
+            advice["breach_horizon"] = []
+
         return advice
 
     # -------------------------------------------------------------------------
@@ -411,6 +524,9 @@ class Database:
 
 
 # =============================================================================
-# Global singleton
+# Global singleton + router
 # =============================================================================
 db = Database()
+
+from .router import QueryRouter, Intent, Backend  # noqa: E402,F401
+router = QueryRouter(db)

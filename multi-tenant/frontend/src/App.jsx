@@ -23,21 +23,157 @@ const SEV = {
 };
 const SevBadge = ({ s }) => <span className={`badge badge-${s}`}>{s}</span>;
 
-// ========== 2. TOASTS ==========
-const ToastContainer = ({ toasts, onDismiss }) => (
-  <div className="fixed top-4 right-4 z-[9999] space-y-2 w-80 mono">
+// ========== 2. INCIDENT TOAST ==========
+// Toasts are state-aware and live as long as their underlying incident.
+// Shape: { id, state: 'active' | 'resolved' | 'info', severity, message, sub, threat?, ts }
+// - 'active' toasts persist on screen (NO auto-dismiss) until a matching
+//   threat:resolved arrives or the user dismisses them.
+// - 'resolved' toasts show the green "CLEARED" treatment for ~3.5s then fade.
+// - 'info' toasts (non-threat events) auto-dismiss after 6s, like before.
+const IncidentToast = ({ toasts, onDismiss }) => (
+  <div className="fixed top-4 right-4 z-[9999] space-y-2 w-96 mono pointer-events-none">
     <AnimatePresence>
-      {toasts.map(t => (
-        <motion.div key={t.id} initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
-          className="panel p-3 cursor-pointer flex items-start gap-4 border-l-2" 
-          style={{ borderLeftColor: SEV[t.severity] || '#d97706' }}
-          onClick={() => onDismiss(t.id)}>
-          <div className="flex-1 min-w-0">
-            <div className="text-[11px] text-gray-300 leading-snug uppercase tracking-tight">{t.message}</div>
-            <div className="text-[9px] text-[#52525b] mt-1">LOG {'>'} {t.event}</div>
+      {toasts.map(t => {
+        const resolved = t.state === 'resolved';
+        const accent = resolved ? '#10b981' : (SEV[t.severity] || '#d97706');
+        const iconCls = resolved ? 'fa-circle-check' : (t.state === 'info' ? 'fa-circle-info' : 'fa-triangle-exclamation');
+        const glow = !resolved && (t.severity === 'critical' || t.severity === 'emergency');
+        return (
+          <motion.div key={t.id}
+            layout
+            initial={{ opacity: 0, x: 40, scale: 0.96 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            exit={{ opacity: 0, x: 60, scale: 0.95 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+            className="panel p-3 pl-4 cursor-pointer flex items-start gap-3 border-l-2 pointer-events-auto"
+            style={{
+              borderLeftColor: accent,
+              boxShadow: glow ? `0 0 0 1px ${accent}30, 0 8px 32px ${accent}20` : undefined,
+              background: resolved ? 'linear-gradient(90deg, #10b98108 0%, #10101280 100%)' : undefined,
+            }}
+            onClick={() => onDismiss(t.id)}>
+            <i className={`fas ${iconCls} text-[14px] mt-0.5`} style={{ color: accent }} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] tracking-[0.18em] uppercase font-bold" style={{ color: accent }}>
+                  {resolved ? 'cleared' : (t.severity || 'alert')}
+                </span>
+                {!resolved && t.state === 'active' && (
+                  <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: accent }} />
+                )}
+              </div>
+              <div className="text-[12px] text-[#e4e4e7] leading-snug mt-0.5">{t.message}</div>
+              {t.sub && <div className="text-[9px] text-[#71717a] mt-0.5">{t.sub}</div>}
+            </div>
+            <button
+              className="text-[#52525b] hover:text-[#e4e4e7] text-[10px] leading-none mt-0.5 px-1"
+              onClick={(e) => { e.stopPropagation(); onDismiss(t.id); }}>
+              ×
+            </button>
+          </motion.div>
+        );
+      })}
+    </AnimatePresence>
+  </div>
+);
+
+// ========== 2b. ACTIVE INCIDENT BANNER ==========
+// Sticky top-of-content banner that surfaces while ANY active incident is
+// in flight. Hides automatically at zero. Click to jump to threats page.
+const SEV_RANK = { emergency: 0, critical: 1, high: 2, medium: 3, low: 4, info: 5, safe: 6 };
+const ActiveIncidentBanner = ({ activeThreats, onJump }) => {
+  const count = activeThreats.length;
+  if (count === 0) return null;
+  const worst = activeThreats.reduce((a, t) => (SEV_RANK[t.severity] < SEV_RANK[a.severity] ? t : a), activeThreats[0]);
+  const accent = SEV[worst.severity] || '#ef4444';
+  return (
+    <motion.button
+      type="button"
+      onClick={onJump}
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      className="w-full mb-4 px-4 py-2.5 rounded-sm flex items-center gap-3 text-left border"
+      style={{ borderColor: `${accent}55`, background: `${accent}10`, boxShadow: `0 0 24px ${accent}20` }}>
+      <span className="relative flex h-2.5 w-2.5">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ background: accent }} />
+        <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ background: accent }} />
+      </span>
+      <div className="flex-1 min-w-0 mono">
+        <span className="text-[11px] font-bold tracking-[0.2em] uppercase" style={{ color: accent }}>
+          {count} active {count === 1 ? 'breach' : 'breaches'}
+        </span>
+        <span className="text-[10px] text-[#a1a1aa] ml-3">
+          worst: {worst.severity} · {worst.threat_type}{worst.icao24 ? ` · ${worst.icao24}` : ''}
+        </span>
+      </div>
+      <span className="text-[9px] mono text-[#71717a] tracking-widest">VIEW →</span>
+    </motion.button>
+  );
+};
+
+// ========== 2c. NOTIFICATION BELL ==========
+// Top-bar bell with unread count + dropdown showing the rolling history of
+// incidents (active + resolved). Resolved entries get the green pip; active
+// entries pulse. Mirrors the toast deck but persists across navigations.
+const NotificationBell = ({ history, unread, onOpen, isOpen, onClear, onJump }) => (
+  <div className="relative">
+    <button
+      onClick={onOpen}
+      className="relative w-9 h-9 flex items-center justify-center rounded-sm border border-[#27272a] bg-[#101012] text-[#a1a1aa] hover:text-[#e4e4e7] hover:border-[#3f3f46] transition-all"
+      title="Incidents">
+      <i className="fas fa-bell text-[12px]" />
+      {unread > 0 && (
+        <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full text-[9px] mono font-bold flex items-center justify-center bg-[#b91c1c] text-white border border-[#0a0a0b]">
+          {unread > 99 ? '99+' : unread}
+        </span>
+      )}
+    </button>
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0, y: -8, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -8, scale: 0.96 }}
+          transition={{ duration: 0.15 }}
+          className="absolute right-0 mt-2 w-96 panel z-[9998] overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-[#27272a]">
+            <span className="text-[10px] mono tracking-[0.2em] uppercase text-[#a1a1aa]">Incidents</span>
+            {history.length > 0 && (
+              <button onClick={onClear} className="text-[9px] mono text-[#71717a] hover:text-[#e4e4e7] uppercase tracking-wider">Clear</button>
+            )}
+          </div>
+          <div className="max-h-96 overflow-y-auto">
+            {history.length === 0 && (
+              <div className="px-4 py-8 text-center text-[10px] mono text-[#52525b] uppercase tracking-wider">
+                <i className="fas fa-shield-check text-[24px] block mb-2 opacity-30" />
+                no incidents
+              </div>
+            )}
+            {history.map(item => {
+              const accent = item.state === 'resolved' ? '#10b981' : (SEV[item.severity] || '#d97706');
+              return (
+                <button key={item.id} onClick={() => onJump(item)}
+                  className="w-full flex items-start gap-3 px-4 py-3 border-b border-[#1c1c20] hover:bg-[#161618] text-left transition-colors">
+                  <div className="w-1 self-stretch rounded-full" style={{ background: accent }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[9px] mono uppercase tracking-[0.15em] font-bold" style={{ color: accent }}>
+                        {item.state === 'resolved' ? '✓ resolved' : item.severity || 'alert'}
+                      </span>
+                      <span className="text-[9px] mono text-[#52525b]">
+                        {new Date(item.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-[#e4e4e7] mt-0.5 truncate">{item.message}</div>
+                    {item.sub && <div className="text-[9px] text-[#71717a] mt-0.5 truncate">{item.sub}</div>}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </motion.div>
-      ))}
+      )}
     </AnimatePresence>
   </div>
 );
@@ -239,8 +375,9 @@ const Dashboard = ({ data }) => {
 };
 
 // ========== 7. ASSETS PAGE (ללא כפילויות + מיון) ==========
-const AssetsPage = ({ assets, user, selectedAsset, onClearSelected }) => {
+const AssetsPage = ({ assets, user, selectedAsset, onClearSelected, onIsolate }) => {
   const [sel, setSel] = useState(null);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (selectedAsset) setSel(selectedAsset);
   }, [selectedAsset]);
@@ -332,6 +469,31 @@ const AssetsPage = ({ assets, user, selectedAsset, onClearSelected }) => {
                     <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                     <Marker position={[sel.latitude, sel.longitude]} />
                   </MapContainer>
+                </div>
+              )}
+              {onIsolate && (user?.role === 'admin' || user?.role === 'analyst' || user?.role === 'superadmin') && (
+                <div className="mt-5 flex gap-2 justify-end">
+                  <button
+                    disabled={busy}
+                    onClick={async () => {
+                      const isolating = sel.status !== 'compromised';
+                      setBusy(true);
+                      try {
+                        await onIsolate(sel, isolating);
+                        setSel({ ...sel, status: isolating ? 'compromised' : 'active' });
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                    className={`text-[11px] mono px-3 py-1.5 rounded border transition-colors ${
+                      sel.status === 'compromised'
+                        ? 'border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10'
+                        : 'border-rose-500/40 text-rose-400 hover:bg-rose-500/10'
+                    } disabled:opacity-50`}
+                  >
+                    <i className={`fas ${sel.status === 'compromised' ? 'fa-link' : 'fa-link-slash'} mr-2`} />
+                    {sel.status === 'compromised' ? 'Restore Asset' : 'Isolate Asset'}
+                  </button>
                 </div>
               )}
             </motion.div>
@@ -1139,50 +1301,155 @@ const Main = () => {
     setLoading(false);
   }, []);
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
-  const handleIsolateAsset = async (asset) => {
-  try {
-    console.log(`🛡️ Isolating asset: ${asset.icao24} - ${asset.name}`);
-    // אם יש API לבידוד - הוסף כאן
-    setToasts(prev => [{
-      id: Date.now(),
-      event: 'asset_isolated',
-      message: `✅ Asset ${asset.icao24} isolated successfully`,
-      severity: 'info'
-    }, ...prev].slice(0, 5));
-  } catch (error) {
-    console.error('Isolation failed:', error);
-  }
-};
+  const handleIsolateAsset = async (asset, isolating = true) => {
+    try {
+      const res = await api.isolateAsset(asset.id, isolating, isolating ? 'manual quarantine via UI' : 'manual restore via UI');
+      const updated = res?.data || asset;
+      setAssets(prev => prev.map(a => a.id === updated.id ? { ...a, ...updated } : a));
+      const toastId = `isolate-${asset.id}-${Date.now()}`;
+      setToasts(prev => [{
+        id: toastId,
+        state: 'info',
+        severity: 'info',
+        message: `${asset.icao24 || asset.name} ${isolating ? 'isolated' : 'restored'}`,
+        sub: isolating ? 'asset quarantined and reported' : 'asset returned to active service',
+        ts: Date.now(),
+      }, ...prev].slice(0, 6));
+      setTimeout(() => setToasts(p => p.filter(t => t.id !== toastId)), 6000);
+      return updated;
+    } catch (err) {
+      const msg = err?.error || err?.message || 'action failed';
+      setToasts(prev => [{
+        id: `isolate-err-${Date.now()}`,
+        state: 'info',
+        severity: 'high',
+        message: `failed to ${isolating ? 'isolate' : 'restore'} ${asset.icao24 || asset.name}`,
+        sub: msg,
+        ts: Date.now(),
+      }, ...prev].slice(0, 6));
+      throw err;
+    }
+  };
+
+  const handleDemoBreach = async () => {
+    try {
+      const list = await api.getFlights();
+      const flights = list?.data || [];
+      if (flights.length === 0) {
+        setToasts(prev => [{
+          id: `demo-empty-${Date.now()}`, state: 'info', severity: 'info',
+          message: 'no live flights to attack', sub: 'start the simulator first', ts: Date.now(),
+        }, ...prev].slice(0, 6));
+        return;
+      }
+      const target = flights[Math.floor(Math.random() * flights.length)];
+      const types = ['gps_spoofing', 'ads-b_injection', 'mode-s_replay', 'rogue_atc'];
+      await api.injectAttack(target.assetId, {
+        severity: 'critical',
+        type: types[Math.floor(Math.random() * types.length)],
+      });
+    } catch (err) {
+      console.error('Demo breach failed:', err);
+    }
+  };
 
   const liveAssets = useTelemetry(assets, wsOn);
   const displayAssets = filteredAssets ?? liveAssets;
 
+  // State-aware incident toast deck. A `threat:new` pushes a sticky toast
+  // keyed by threat id; the matching `threat:resolved` flips its state to
+  // 'resolved' (green ✓) and schedules a 3.5s fade. Manual ack dismisses.
+  const [history, setHistory] = useState([]);
+  const [unread, setUnread] = useState(0);
+  const [bellOpen, setBellOpen] = useState(false);
+  const resolveTimers = useRef(new Map());
+
   useEffect(() => {
     if (!wsOn) return;
-    const pushToast = (evt, threat, sev) => {
-      const id = `${evt}-${threat?.id || Date.now()}-${Math.random()}`;
-      const msg = evt === 'threat:resolved'
-        ? `✓ ${threat?.threat_type || 'threat'} cleared${threat?.icao24 ? ` on ${threat.icao24}` : ''}`
-        : `${threat?.threat_type || 'alert'}${threat?.icao24 ? ` · ${threat.icao24}` : ''}`;
-      const toast = { id, event: evt, message: msg, severity: sev };
-      setToasts(prev => [toast, ...prev].slice(0, 5));
-      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 6000);
-    };
-    const unsubNew = wsOn('threat:new', (t) => {
-      pushToast('threat:new', t, t?.severity || 'high');
-      if (t?.severity === 'emergency' || t?.severity === 'critical') {
-        speak(`${t.severity}: ${t.threat_type} on ${t.icao24 || 'aircraft'}`);
-        notify('Shadow NDR Alert', { body: `${t.threat_type} – ${t.description?.slice(0, 100) || ''}`, icon: '/favicon.ico' });
+
+    const labelFor = (t) => `${t?.threat_type || 'threat'}${t?.icao24 ? ` · ${t.icao24}` : ''}`;
+    const subFor = (t) => t?.description ? t.description.slice(0, 90) : (t?.source_ip ? `from ${t.source_ip}` : null);
+
+    const onNew = (t) => {
+      const tid = t?.id ?? `live-${Date.now()}`;
+      const sev = t?.severity || 'high';
+      const id = `threat-${tid}`;
+      const entry = {
+        id, threatId: tid, state: 'active', severity: sev,
+        message: labelFor(t), sub: subFor(t), threat: t, ts: Date.now(),
+      };
+      setToasts(prev => {
+        const without = prev.filter(p => p.id !== id);
+        return [entry, ...without].slice(0, 6);
+      });
+      setHistory(prev => [entry, ...prev.filter(p => p.id !== id)].slice(0, 50));
+      setUnread(u => u + 1);
+      if (sev === 'emergency' || sev === 'critical') {
+        speak(`${sev}: ${t.threat_type} on ${t.icao24 || 'aircraft'}`);
+        notify('Shadow NDR — Active breach', {
+          body: `${t.threat_type}${t.icao24 ? ` on ${t.icao24}` : ''}${t.description ? ' — ' + t.description.slice(0, 80) : ''}`,
+          icon: '/favicon.ico',
+        });
       }
       load();
-    });
-    const unsubRes = wsOn('threat:resolved', (t) => {
-      pushToast('threat:resolved', t, 'low');
+    };
+
+    const onResolved = (t) => {
+      const tid = t?.id;
+      if (tid == null) return load();
+      const id = `threat-${tid}`;
+      setToasts(prev => prev.map(p => p.id === id ? { ...p, state: 'resolved', ts: Date.now() } : p));
+      setHistory(prev => prev.map(p => p.id === id ? { ...p, state: 'resolved', ts: Date.now() } : p));
+      const existing = resolveTimers.current.get(id);
+      if (existing) clearTimeout(existing);
+      const handle = setTimeout(() => {
+        setToasts(prev => prev.filter(p => p.id !== id));
+        resolveTimers.current.delete(id);
+      }, 3500);
+      resolveTimers.current.set(id, handle);
       load();
+    };
+
+    const onAlert = (a) => {
+      const id = `alert-${a?.id || Date.now()}`;
+      const entry = {
+        id, state: 'info', severity: a?.severity || 'high',
+        message: a?.title || 'New alert', sub: a?.message ? a.message.slice(0, 100) : null,
+        ts: Date.now(),
+      };
+      setToasts(prev => [entry, ...prev].slice(0, 6));
+      setHistory(prev => [entry, ...prev].slice(0, 50));
+      setUnread(u => u + 1);
+      setTimeout(() => setToasts(prev => prev.filter(p => p.id !== id)), 6000);
+    };
+
+    const unsubNew = wsOn('threat:new', onNew);
+    const unsubUpd = wsOn('threat:update', (t) => {
+      // dedupe hit — refresh the existing sticky toast's sub-line so the
+      // operator can see hit_count climb without spawning new toasts.
+      const id = `threat-${t?.id}`;
+      setToasts(prev => prev.map(p => p.id === id
+        ? { ...p, sub: t.hit_count ? `× ${t.hit_count} hits · ${t.description?.slice(0, 60) || ''}` : p.sub, ts: Date.now() }
+        : p));
     });
-    const unsubAlert = wsOn('new_alert', (a) => pushToast('new_alert', a, a?.severity || 'high'));
-    return () => { unsubNew(); unsubRes(); unsubAlert(); };
+    const unsubRes = wsOn('threat:resolved', onResolved);
+    const unsubAlert = wsOn('new_alert', onAlert);
+
+    return () => {
+      unsubNew(); unsubUpd(); unsubRes(); unsubAlert();
+      resolveTimers.current.forEach(h => clearTimeout(h));
+      resolveTimers.current.clear();
+    };
   }, [wsOn, speak, load]);
+
+  // Active-incident derivation for the banner. Prefers the sticky-toast
+  // set (which reflects live WS state) but falls back to the polled
+  // threats list so the banner still surfaces on first paint.
+  const activeIncidents = useMemo(() => {
+    const live = toasts.filter(t => t.state === 'active' && t.threat).map(t => t.threat);
+    if (live.length > 0) return live;
+    return threats.filter(th => th?.status === 'active');
+  }, [toasts, threats]);
 
   const unacked = useMemo(() => alerts.filter(a => !a.acknowledged).length, [alerts]);
 
@@ -1204,7 +1471,11 @@ const Main = () => {
   return (
     <div className="min-h-screen flex scanlines overflow-hidden" data-theme={theme}>
       <Sidebar page={page} setPage={setPage} user={user} logout={logout} unacked={unacked} />
-      <ToastContainer toasts={toasts} onDismiss={id => setToasts(p => p.filter(t => t.id !== id))} />
+      <IncidentToast toasts={toasts} onDismiss={id => {
+        const h = resolveTimers.current.get(id);
+        if (h) { clearTimeout(h); resolveTimers.current.delete(id); }
+        setToasts(p => p.filter(t => t.id !== id));
+      }} />
       <CopilotChat 
   onNavigate={handleNavigate} 
   onFilterAssets={handleFilterAssets} 
@@ -1216,8 +1487,25 @@ const Main = () => {
         <div className="flex items-center justify-between mb-6">
           <div><h1 className="font-display font-bold text-xl text-gradient">{NAV.find(n => n.id === page)?.label || page}</h1><div className="text-[10px] mono text-gray-600 mt-0.5">{user?.tenant_name} · {new Date().toLocaleTimeString()}</div></div>
           <div className="flex items-center gap-3">
+            {(user?.role === 'admin' || user?.role === 'superadmin') && (
+              <button
+                onClick={handleDemoBreach}
+                className="text-[10px] mono px-3 py-1.5 rounded-sm border border-[#b91c1c] text-[#ef4444] hover:bg-[#b91c1c20] uppercase tracking-wider transition-all flex items-center gap-2"
+                title="Inject a critical attack on a random live flight">
+                <i className="fas fa-radiation text-[10px]" />
+                <span>Demo_Breach</span>
+              </button>
+            )}
+            <NotificationBell
+              history={history}
+              unread={unread}
+              isOpen={bellOpen}
+              onOpen={() => { setBellOpen(o => !o); if (!bellOpen) setUnread(0); }}
+              onClear={() => { setHistory([]); setUnread(0); }}
+              onJump={() => { setBellOpen(false); setPage('threats'); }}
+            />
             <button onClick={handleExportPDF} className="text-[10px] mono px-3 py-1.5 rounded-sm border border-[#27272a] text-[#71717a] hover:bg-[#1c1c20] hover:text-[#e4e4e7] uppercase transition-all flex items-center gap-2">
-              <i className="fas fa-file-pdf text-[9px]" /> 
+              <i className="fas fa-file-pdf text-[9px]" />
               <span>Export_PDF</span>
             </button>
             <button onClick={load} className="text-[10px] mono px-3 py-1.5 rounded-sm border border-[#27272a] text-[#71717a] hover:bg-[#1c1c20] hover:text-[#e4e4e7] uppercase transition-all flex items-center gap-2">
@@ -1230,12 +1518,13 @@ const Main = () => {
             </div>
           </div>
         </div>
+        <ActiveIncidentBanner activeThreats={activeIncidents} onJump={() => setPage('threats')} />
         <CriticalBanner assets={displayAssets} onJumpToMap={() => setPage('map')} />
         <AnimatePresence mode="wait">
           <motion.div key={page} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: .2 }}>
             {page === 'dashboard' && <><Dashboard data={dashData} /><ForecastChart timeline={dashData?.timeline} /></>}
             {page === 'map' && (<div><div className="flex justify-end mb-2 gap-2"><button onClick={() => setShow3D(false)} className={`text-[10px] mono px-3 py-1 rounded-sm border ${!show3D ? 'border-[#d97706] text-[#d97706] bg-[#d9770610]' : 'border-[#27272a] text-[#52525b] hover:text-[#a1a1aa]'}`}>[ 2D_RADAR ]</button><button onClick={() => setShow3D(true)} className={`text-[10px] mono px-3 py-1 rounded-sm border ${show3D ? 'border-[#d97706] text-[#d97706] bg-[#d9770610]' : 'border-[#27272a] text-[#52525b] hover:text-[#a1a1aa]'}`}>[ 3D_GLOBE ]</button></div>{show3D ? <Globe3D assets={displayAssets} /> : <LiveMap assets={displayAssets} />}</div>)}
-            {page === 'assets' && <AssetsPage assets={displayAssets} user={user} selectedAsset={selectedAsset} onClearSelected={handleClearSelected} />}
+            {page === 'assets' && <AssetsPage assets={displayAssets} user={user} selectedAsset={selectedAsset} onClearSelected={handleClearSelected} onIsolate={(asset, isolating) => handleIsolateAsset(asset, isolating)} />}
             {page === 'threats' && <ThreatsPage threats={threats} onUpdateStatus={async (id, status) => { await api.updateThreat(id, { status }); load(); }} />}
             {page === 'alerts' && <AlertsPage alerts={alerts} onAck={async (id) => { await api.ackAlert(id); load(); }} />}
             {page === 'reports' && <ReportsPage reports={reports} />}

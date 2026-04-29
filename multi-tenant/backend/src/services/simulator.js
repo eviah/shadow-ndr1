@@ -238,7 +238,7 @@ export async function injectAttack(tenantId, assetId, { severity = 'critical', t
         description: `Simulated ${severity} ${type} attack on ${f.callsign} (${f.icao24})`,
         raw_features: { simulated: true },
         mitre_technique: null,
-    });
+    }, ioRef);
     if (ioRef) {
         ioRef.to(`tenant:${tenantId}`).emit(created ? 'threat:new' : 'threat:update', threat);
     }

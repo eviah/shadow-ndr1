@@ -43,6 +43,8 @@ zstd = { version = "0.13", optional = true }
 rayon = "1.8"
 crossbeam = "0.8"
 crossbeam-channel = "0.5"
+memmap2 = "0.9"
+prost = "0.12"
 
 # ============ Concurrency Control ============
 dashmap = "5.5"
@@ -68,6 +70,22 @@ tower-http = { version = "0.5", features = ["cors", "trace"] }
 # ============ Security & Hashing ============
 blake3 = "1.5"
 ring = "0.17"
+sha3 = "0.10"
+sha2 = "0.10"
+hkdf = "0.12"
+hmac = "0.12"
+aes-gcm = "0.10"
+rand = "0.8"
+rand_chacha = "0.3"
+getrandom = "0.2"
+# Post-quantum (NIST FIPS 203 / 204): RustCrypto reference impls
+ml-kem = "0.2"
+ml-dsa = "0.0.4"
+
+# ============ Numeric / SIMD ============
+num_cpus = "1.16"
+core_affinity = "0.8"
+nalgebra = "0.32"
 
 # ============ Configuration ============
 serde_yaml = "0.9"

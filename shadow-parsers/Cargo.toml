@@ -62,6 +62,7 @@ chrono = { version = "0.4", features = ["serde"] }
 # Physics Engine State
 lru = "0.12"
 lazy_static = "1.4"
+nalgebra = "0.32"
 
 # Utilities
 anyhow = "1.0"

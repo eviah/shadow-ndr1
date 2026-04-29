@@ -350,6 +350,71 @@ router.patch('/:id', requireRole('admin'), async (req, res) => {
     }
 });
 
+// ─── ISOLATE asset (analyst+) — quarantine on suspected compromise ──────────
+// Records isolation flag in metadata and flips status to 'compromised' until
+// cleared. Idempotent: re-POSTing with isolated:false un-isolates.
+router.post('/:id/isolate', requireRole('admin', 'analyst'), async (req, res) => {
+    const { id } = req.params;
+    const isolated = req.body?.isolated !== false; // default true
+    const reason = (req.body?.reason || '').slice(0, 500);
+
+    try {
+        const cur = await tq(req, `SELECT id, name, icao24, metadata, status FROM assets WHERE id = $1`, [id]);
+        if (!cur.rows.length) {
+            return res.status(404).json({ success: false, error: 'Asset not found' });
+        }
+        const meta = { ...(cur.rows[0].metadata || {}) };
+        if (isolated) {
+            meta.isolated = true;
+            meta.isolated_at = new Date().toISOString();
+            meta.isolated_by = req.user.username;
+            meta.isolation_reason = reason || 'manual';
+        } else {
+            meta.isolated = false;
+            meta.unisolated_at = new Date().toISOString();
+            meta.unisolated_by = req.user.username;
+        }
+        const nextStatus = isolated ? 'compromised' : 'active';
+
+        const upd = await tq(req,
+            `UPDATE assets SET metadata = $1::jsonb, status = $2 WHERE id = $3 RETURNING *`,
+            [JSON.stringify(meta), nextStatus, id]);
+
+        wsManager.broadcastToTenant(req.user.tenant_id, {
+            event: 'asset:isolated',
+            data: {
+                asset_id: Number(id),
+                icao24: upd.rows[0].icao24,
+                isolated,
+                reason,
+                by: req.user.username,
+                at: meta.isolated_at || meta.unisolated_at,
+            },
+        });
+        // also fire the canonical asset_updated event so any list view refreshes
+        wsManager.broadcastToTenant(req.user.tenant_id, {
+            event: 'asset_updated',
+            data: upd.rows[0],
+        });
+
+        await auditLog({
+            tenantId: req.user.tenant_id,
+            userId: req.user.id,
+            username: req.user.username,
+            action: isolated ? 'ISOLATE_ASSET' : 'UNISOLATE_ASSET',
+            resource: 'asset',
+            resourceId: id,
+            details: { reason },
+            ip: req.ip,
+        });
+
+        res.json({ success: true, data: upd.rows[0] });
+    } catch (err) {
+        console.error('Isolate asset error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ─── DELETE asset (admin only) ───────────────────────────────────────────────
 router.delete('/:id', requireRole('admin'), async (req, res) => {
     const { id } = req.params;

@@ -33,6 +33,11 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
+	"shadow-ndr/ingestion/internal/avmath"
+	"shadow-ndr/ingestion/internal/entropy"
+	"shadow-ndr/ingestion/internal/gossip"
+	"shadow-ndr/ingestion/internal/honeynet"
+	"shadow-ndr/ingestion/internal/htb"
 	"shadow-ndr/ingestion/internal/kafka"
 	"shadow-ndr/ingestion/internal/ml"
 	"shadow-ndr/ingestion/internal/models"
@@ -357,41 +362,8 @@ func safeGo(name string, fn func()) {
 	}()
 }
 
-type RateLimiter struct {
-	mu    sync.RWMutex
-	limit int
-	win   time.Duration
-	count map[string][]time.Time
-}
-
-func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
-	return &RateLimiter{
-		limit: limit,
-		win:   window,
-		count: make(map[string][]time.Time),
-	}
-}
-
-func (rl *RateLimiter) Allow(ip string) bool {
-	now := time.Now()
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	times := rl.count[ip]
-	cutoff := now.Add(-rl.win)
-	keep := 0
-	for _, t := range times {
-		if t.After(cutoff) {
-			times[keep] = t
-			keep++
-		}
-	}
-	times = times[:keep]
-	if len(times) >= rl.limit {
-		return false
-	}
-	rl.count[ip] = append(times, now)
-	return true
-}
+// (Legacy sliding-window RateLimiter was replaced by the hierarchical
+// token-bucket limiter in `internal/htb`. See ProcessorState.rateLimiter.)
 
 // ----------------------------------------------------------------------------
 // Threat Intelligence Cache
@@ -420,6 +392,22 @@ func (t *ThreatIntelCache) Lookup(ip string) (ThreatEntry, bool) {
 	defer t.mu.RUnlock()
 	e, ok := t.ips[ip]
 	return e, ok
+}
+
+// Add inserts (or upgrades) a threat record. Implements gossip.Sink so
+// peer-broadcast sightings flow straight into the local cache. The
+// `icao24` argument is included in the interface for future use (per-
+// aircraft blocklisting); it's accepted but not yet stored.
+func (t *ThreatIntelCache) Add(ip, _icao24, threatType, source string, score float64) {
+	if ip == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if existing, ok := t.ips[ip]; ok && existing.Score >= score {
+		return
+	}
+	t.ips[ip] = ThreatEntry{Score: score, Type: threatType, Source: source}
 }
 
 func (t *ThreatIntelCache) Refresh(ctx context.Context, feedURL string) {
@@ -631,10 +619,7 @@ func extractFeatures(p models.ParsedPacket, history []models.ParsedPacket) ml.An
 	uniqDst := math.Min(float64(len(dstSet))/256.0, 1.0)
 	uniqPort := math.Min(float64(len(portSet))/1024.0, 1.0)
 	now := time.Now()
-	hourSin := math.Sin(2 * math.Pi * float64(now.Hour()) / 24)
-	hourCos := math.Cos(2 * math.Pi * float64(now.Hour()) / 24)
-	daySin := math.Sin(2 * math.Pi * float64(now.Weekday()) / 7)
-	dayCos := math.Cos(2 * math.Pi * float64(now.Weekday()) / 7)
+	hourSin, hourCos, daySin, dayCos := avmath.TimeOfDayCyclic(now.Hour(), int(now.Weekday()))
 	isTCP := b2f(p.Proto == 6)
 	isUDP := b2f(p.Proto == 17)
 	isICMP := b2f(p.Proto == 1)
@@ -657,12 +642,10 @@ func extractFeatures(p models.ParsedPacket, history []models.ParsedPacket) ml.An
 		prev := history[len(history)-1]
 		if prev.Altitude != nil && p.Altitude != nil {
 			dt := p.Timestamp.Sub(prev.Timestamp).Seconds()
-			if dt > 0 {
-				altitudeRate = (float64(*p.Altitude) - float64(*prev.Altitude)) / dt
-			}
+			altitudeRate = avmath.AltitudeRate(float64(*p.Altitude), float64(*prev.Altitude), dt)
 		}
 		if prev.Velocity != nil && p.Velocity != nil {
-			velocityDeviation = math.Abs(float64(*p.Velocity) - float64(*prev.Velocity))
+			velocityDeviation = avmath.VelocityDeviation(float64(*p.Velocity), float64(*prev.Velocity))
 		}
 	}
 	squawkAnomaly := 0.0
@@ -726,9 +709,19 @@ func b2f(b bool) float64 {
 // ----------------------------------------------------------------------------
 // Enricher (Aviation‑only)
 // ----------------------------------------------------------------------------
+//
+// Now does:
+//   - threat-intel lookup (existing)
+//   - aircraft-detail enrichment via Redis (existing)
+//   - hierarchical-token-bucket rate limiting (replaces the old
+//     sliding-window RateLimiter)
+//   - honeynet observation: any packet carrying a decoy ICAO24 is
+//     treated as evidence of recon / spoofing; the SrcIP is escalated
+//     into threat-intel and broadcast across the gossip mesh.
 func enrichPacket(ctx context.Context, p *models.ParsedPacket,
-	threatIntel *ThreatIntelCache, redis *storage.RedisClient,
-	rateLimiter *RateLimiter, cfg Config) {
+	threatIntel *ThreatIntelCache, redisCli *storage.RedisClient,
+	rateLimiter *htb.Limiter, hn *honeynet.Worker, mesh *gossip.Mesh,
+	cfg Config) {
 
 	p.OrgID = "default"
 
@@ -744,28 +737,50 @@ func enrichPacket(ctx context.Context, p *models.ParsedPacket,
 	}
 
 	// Aviation enrichment: fetch aircraft details from Redis
+	var operator string
 	if p.ICAO24 != nil && *p.ICAO24 != "" {
 		var aircraft struct {
 			Registration string `json:"registration"`
 			Type         string `json:"type"`
 			Operator     string `json:"operator"`
 		}
-		if err := redis.GetAircraft(ctx, *p.ICAO24, &aircraft); err == nil {
+		if err := redisCli.GetAircraft(ctx, *p.ICAO24, &aircraft); err == nil {
 			if aircraft.Type != "" {
 				p.AircraftType = &aircraft.Type
 			}
 			if aircraft.Operator != "" {
+				operator = aircraft.Operator
 				p.Tags = append(p.Tags, "operator:"+aircraft.Operator)
 			}
 		}
 	}
 
-	// Rate limiting per aircraft (ICAO24) or IP
-	rateKey := p.SrcIP
-	if p.ICAO24 != nil && *p.ICAO24 != "" {
-		rateKey = *p.ICAO24
+	// Honeynet: a real ADS-B stream carrying a decoy ICAO24 means somebody
+	// is replaying our cache or spoofing IDs. Escalate hard.
+	if hn != nil && p.ICAO24 != nil && honeynet.IsDecoyICAO(*p.ICAO24) {
+		hn.Observe(ctx, *p.ICAO24, p.SrcIP, "packet")
+		threatIntel.Add(p.SrcIP, *p.ICAO24, "honeynet_recon", "honeynet", 0.95)
+		p.ThreatScore = 0.95
+		p.ThreatType = "honeynet_recon"
+		p.ThreatSource = "honeynet"
+		if mesh != nil {
+			_ = mesh.Publish(ctx, gossip.Event{
+				IP:         p.SrcIP,
+				ICAO24:     *p.ICAO24,
+				Score:      0.95,
+				ThreatType: "honeynet_recon",
+				Reason:     "decoy ICAO24 observed in real packet stream",
+			})
+		}
 	}
-	if !rateLimiter.Allow(rateKey) {
+
+	// Hierarchical rate limit: airline (operator) → aircraft (ICAO24) →
+	// global. Empty levels are skipped.
+	icaoKey := ""
+	if p.ICAO24 != nil {
+		icaoKey = *p.ICAO24
+	}
+	if !rateLimiter.Allow(operator, icaoKey) {
 		rateLimitedPackets.Inc()
 		p.RateAnomaly = true
 	}
@@ -782,7 +797,10 @@ type ProcessorState struct {
 	mlCB        *MLCircuitBreaker
 	threatIntel *ThreatIntelCache
 	dlq         *kafka.Producer
-	rateLimiter *RateLimiter
+	rateLimiter *htb.Limiter
+	honeynet    *honeynet.Worker
+	gossip      *gossip.Mesh
+	entropy     *entropy.Window
 	batchMu     sync.Mutex
 	batch       []models.ParsedPacket
 	flushCh     chan struct{}
@@ -1032,8 +1050,30 @@ func (ps *ProcessorState) processPacket(ctx context.Context, data []byte) error 
 	processingLatency.WithLabelValues("parse").Observe(time.Since(t0).Seconds())
 
 	t0 = time.Now()
-	enrichPacket(ctx, &packet, ps.threatIntel, ps.redis, ps.rateLimiter, *ps.cfg)
+	enrichPacket(ctx, &packet, ps.threatIntel, ps.redis, ps.rateLimiter,
+		ps.honeynet, ps.gossip, *ps.cfg)
 	processingLatency.WithLabelValues("enrich").Observe(time.Since(t0).Seconds())
+
+	// Sliding-window Shannon entropy over the raw event payload. We use
+	// the original kafka byte slice as the "payload" — for ADS-B / ARINC
+	// this is the encoded frame; for IP traffic it'd be the captured
+	// bytes. High sustained entropy on a non-TLS port is the covert-C2
+	// signal we feed into both the score and the operator alert.
+	t0 = time.Now()
+	hBits := entropy.ShannonBits(data)
+	avgH, emaH, _ := ps.entropy.Observe(entropy.FlowKey{
+		Src: packet.SrcIP, Dst: packet.DstIP, DstPort: packet.DstPort,
+	}, hBits)
+	if entropy.IsCovert(emaH) && packet.DstPort != 443 && packet.DstPort != 853 {
+		packet.Tags = append(packet.Tags, "entropy:covert")
+	}
+	if packet.ParsedData == nil {
+		packet.ParsedData = make(map[string]interface{})
+	}
+	packet.ParsedData["entropy_bits"] = hBits
+	packet.ParsedData["entropy_window_avg"] = avgH
+	packet.ParsedData["entropy_window_ema"] = emaH
+	processingLatency.WithLabelValues("entropy").Observe(time.Since(t0).Seconds())
 
 	history, err := ps.loadIPHistory(ctx, packet.SrcIP)
 	if err != nil {
@@ -1091,6 +1131,26 @@ func (ps *ProcessorState) processPacket(ctx context.Context, data []byte) error 
 			AttackTypes: packet.AttackTypes,
 			Severity:    severity,
 		}, ps.cfg.Alerting.SOARWebhook)
+	}
+
+	// Mesh gossip: any score above the high-confidence threshold is
+	// broadcast to peer nodes so they can pre-emptively block this IP /
+	// ICAO24 before it reaches them.
+	if ps.gossip != nil && alertScore >= gossip.HighConfidence {
+		icaoStr := ""
+		if packet.ICAO24 != nil {
+			icaoStr = *packet.ICAO24
+		}
+		ev := gossip.Event{
+			IP:         packet.SrcIP,
+			ICAO24:     icaoStr,
+			Score:      alertScore,
+			ThreatType: packet.ThreatType,
+			Reason:     "ml_high_confidence",
+		}
+		safeGo("gossip-publish", func() {
+			_ = ps.gossip.Publish(context.Background(), ev)
+		})
 	}
 
 	ps.batchMu.Lock()
@@ -1185,7 +1245,35 @@ func main() {
 	}
 	defer dlqProducer.Close()
 
-	rateLimiter := NewRateLimiter(1000, cfg.Processor.RateLimitInterval)
+	// Hierarchical token-bucket: 500/sec per aircraft, 5000/sec per
+	// airline, 50000/sec global ceiling.
+	rateLimiter := htb.New(htb.DefaultConfig())
+
+	// Honeynet: synthetic decoy aircraft injected into the cache.
+	hn := honeynet.New(redis, honeynet.Config{})
+
+	// Gossip mesh: this node publishes high-confidence sightings on
+	// `ndr:gossip:threats` and absorbs every peer's broadcasts back
+	// into the local threat-intel cache.
+	mesh := gossip.New(redis.Raw(), globalThreatIntel)
+
+	// Honeynet observation hook: when the keyspace bridge or anyone
+	// else flags a decoy hit, push it into threat-intel and gossip.
+	hn.OnObservation = func(ctx context.Context, icao24, srcIP, source string) {
+		if srcIP != "" && srcIP != "<keyspace>" {
+			globalThreatIntel.Add(srcIP, icao24, "honeynet_recon", "honeynet:"+source, 0.95)
+		}
+		_ = mesh.Publish(ctx, gossip.Event{
+			IP:         srcIP,
+			ICAO24:     icao24,
+			Score:      0.95,
+			ThreatType: "honeynet_recon",
+			Reason:     "decoy observed via " + source,
+		})
+	}
+
+	// Sliding-window entropy aggregator: 30s window, 64 samples / flow.
+	entropyWin := entropy.NewWindow(30*time.Second, 64)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	safeGo("threat-intel-refresh", func() {
@@ -1210,9 +1298,29 @@ func main() {
 		threatIntel: globalThreatIntel,
 		dlq:         dlqProducer,
 		rateLimiter: rateLimiter,
+		honeynet:    hn,
+		gossip:      mesh,
+		entropy:     entropyWin,
 		batch:       make([]models.ParsedPacket, 0, cfg.Processor.BatchSize),
 		flushCh:     make(chan struct{}, 4),
 	}
+
+	// Spawn long-running auxiliary workers.
+	safeGo("honeynet", func() { hn.Run(ctx) })
+	safeGo("honeynet-keyspace", func() { hn.PubSubBridge(ctx, redis.Raw()) })
+	safeGo("gossip-mesh", func() { mesh.Run(ctx) })
+	safeGo("entropy-sweep", func() {
+		t := time.NewTicker(2 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				entropyWin.Sweep()
+			}
+		}
+	})
 
 	flushTicker := time.NewTicker(cfg.Processor.FlushInterval)
 	safeGo("flush-ticker", func() {

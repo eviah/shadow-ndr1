@@ -10,7 +10,14 @@ class TenantWSManager {
     this._clients = new Map();   // id → { ws, tenantId, userId, lastPong }
     this._hbTimer = null;
     this._stats = { connections:0, messages_sent:0 };
+    this._io = null;             // socket.io fallback target (preferred transport)
   }
+
+  // Frontend connects via socket.io. All routes/services historically called
+  // wsManager.broadcastToTenant(...) but the raw-ws server was never attached,
+  // so those calls silently dropped. bindIo wires the manager to the live
+  // socket.io instance so existing call sites just start working.
+  bindIo(io) { this._io = io; }
 
   attach(server) {
     this._wss = new WebSocketServer({ server, path: '/ws' });
@@ -53,10 +60,18 @@ class TenantWSManager {
     logger.info('✅ WebSocket server attached (/ws)');
   }
 
-  /** Broadcast to ALL clients of a specific tenant */
+  /** Broadcast to ALL clients of a specific tenant.
+   * Payload shape: { event: string, data: any } — translated to a
+   * socket.io emit on the matching tenant room when an io is bound.
+   */
   broadcastToTenant(tenantId, payload) {
-    const data = JSON.stringify(payload);
     let sent = 0;
+    if (this._io && payload?.event) {
+      this._io.to(`tenant:${tenantId}`).emit(payload.event, payload.data);
+      this._stats.messages_sent++;
+      sent++;
+    }
+    const data = JSON.stringify(payload);
     this._clients.forEach(({ ws, tenantId: tid }) => {
       if (tid === tenantId && ws.readyState === WebSocket.OPEN) {
         ws.send(data); sent++; this._stats.messages_sent++;
@@ -67,6 +82,10 @@ class TenantWSManager {
 
   /** Broadcast to ALL connected clients (superadmin notifications) */
   broadcastAll(payload) {
+    if (this._io && payload?.event) {
+      this._io.emit(payload.event, payload.data);
+      this._stats.messages_sent++;
+    }
     const data = JSON.stringify(payload);
     this._clients.forEach(({ ws }) => {
       if (ws.readyState === WebSocket.OPEN) { ws.send(data); this._stats.messages_sent++; }

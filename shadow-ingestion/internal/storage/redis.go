@@ -122,6 +122,14 @@ func (r *RedisClient) Get(ctx context.Context, key string) (string, error) {
 func (r *RedisClient) Close() error {
 	return r.client.Close()
 }
+
+// Raw exposes the underlying go-redis client. Needed by features that
+// build their own Pub/Sub subscribers (gossip mesh, honeynet keyspace
+// bridge) — those need the actual *redis.Client rather than the small
+// wrapper surface this package exposes.
+func (r *RedisClient) Raw() *redis.Client {
+	return r.client
+}
 func (r *RedisClient) Ping(ctx context.Context) error {
 	return r.client.Ping(ctx).Err()
 }
