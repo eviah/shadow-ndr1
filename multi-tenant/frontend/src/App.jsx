@@ -34,10 +34,12 @@ const IncidentToast = ({ toasts, onDismiss }) => (
   <div className="fixed top-4 right-4 z-[9999] space-y-2 w-96 mono pointer-events-none">
     <AnimatePresence>
       {toasts.map(t => {
-        const resolved = t.state === 'resolved';
-        const accent = resolved ? '#10b981' : (SEV[t.severity] || '#d97706');
-        const iconCls = resolved ? 'fa-circle-check' : (t.state === 'info' ? 'fa-circle-info' : 'fa-triangle-exclamation');
-        const glow = !resolved && (t.severity === 'critical' || t.severity === 'emergency');
+        const mitigated = t.state === 'mitigated';
+        const resolved  = t.state === 'resolved';
+        const accent = (mitigated || resolved) ? '#10b981' : (SEV[t.severity] || '#d97706');
+        const iconCls = mitigated ? 'fa-shield-halved' : resolved ? 'fa-circle-check' : (t.state === 'info' ? 'fa-circle-info' : 'fa-triangle-exclamation');
+        const glow = !mitigated && !resolved && (t.severity === 'critical' || t.severity === 'emergency');
+        const label = mitigated ? 'blocked' : resolved ? 'cleared' : (t.severity || 'alert');
         return (
           <motion.div key={t.id}
             layout
@@ -48,22 +50,28 @@ const IncidentToast = ({ toasts, onDismiss }) => (
             className="panel p-3 pl-4 cursor-pointer flex items-start gap-3 border-l-2 pointer-events-auto"
             style={{
               borderLeftColor: accent,
-              boxShadow: glow ? `0 0 0 1px ${accent}30, 0 8px 32px ${accent}20` : undefined,
-              background: resolved ? 'linear-gradient(90deg, #10b98108 0%, #10101280 100%)' : undefined,
+              boxShadow: glow ? `0 0 0 1px ${accent}30, 0 8px 32px ${accent}20` : (mitigated ? `0 0 0 1px ${accent}40, 0 8px 32px ${accent}30` : undefined),
+              background: (mitigated || resolved) ? 'linear-gradient(90deg, #10b98112 0%, #10101280 100%)' : undefined,
             }}
             onClick={() => onDismiss(t.id)}>
             <i className={`fas ${iconCls} text-[14px] mt-0.5`} style={{ color: accent }} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] tracking-[0.18em] uppercase font-bold" style={{ color: accent }}>
-                  {resolved ? 'cleared' : (t.severity || 'alert')}
+                  {label}
                 </span>
-                {!resolved && t.state === 'active' && (
+                {!mitigated && !resolved && t.state === 'active' && (
                   <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: accent }} />
+                )}
+                {mitigated && t.mitigation?.action && (
+                  <span className="text-[9px] mono px-1.5 py-0.5 rounded" style={{ background: '#10b98115', color: '#34d399', border: '1px solid #10b98140' }}>{t.mitigation.action}</span>
                 )}
               </div>
               <div className="text-[12px] text-[#e4e4e7] leading-snug mt-0.5">{t.message}</div>
               {t.sub && <div className="text-[9px] text-[#71717a] mt-0.5">{t.sub}</div>}
+              {mitigated && t.mitigation?.technique && (
+                <div className="text-[9px] mono text-emerald-500/80 mt-0.5">defender · {t.mitigation.technique} · score {t.mitigation.defender_score}</div>
+              )}
             </div>
             <button
               className="text-[#52525b] hover:text-[#e4e4e7] text-[10px] leading-none mt-0.5 px-1"
@@ -202,6 +210,7 @@ const NAV = [
   { id: 'map', icon: 'map', label: 'Live Map' },
   { id: 'assets', icon: 'plane', label: 'Fleet & Assets' },
   { id: 'threats', icon: 'skull-crossbones', label: 'Threats' },
+  { id: 'redteam', icon: 'dna', label: 'SEART AI' },
   { id: 'alerts', icon: 'bell', label: 'Alerts' },
   { id: 'reports', icon: 'file-contract', label: 'Reports' },
   { id: 'audit', icon: 'shield-check', label: 'Audit Log' },
@@ -557,6 +566,193 @@ const ThreatsPage = ({ threats, onUpdateStatus }) => {
   );
 };
 
+// ========== 8b. SEART (Generative Red-Team) PAGE ==========
+// Shows the live evolutionary cycle: current generation, the 8 attack genomes
+// in flight, their lineage, and the rising mean-fitness curve as the AI
+// sharpens its synthetic attacks against our defenses.
+const FAMILY_COLOR = {
+  spoofing: '#ef4444', jamming: '#d97706', replay: '#a855f7', meaconing: '#22d3ee',
+  deauth: '#84cc16', mitm: '#ec4899', protocol_fuzz: '#06b6d4',
+  side_channel: '#f59e0b', covert_channel: '#10b981', rf_overpower: '#f97316',
+};
+
+const SeartPage = ({ user, status, onPause, onFire, busy }) => {
+  if (!status) {
+    return (
+      <div className="panel p-5">
+        <div className="text-[10px] mono text-s-accent tracking-widest uppercase mb-4">SEART · Synthetic Evolving Adversarial Red-Team</div>
+        <div className="text-xs text-gray-500">Initializing generative engine…</div>
+      </div>
+    );
+  }
+  const canControl = user?.role === 'admin' || user?.role === 'superadmin';
+  const histMax = Math.max(0.001, ...(status.history || []).map(h => h.bestFitness || 0));
+  return (
+    <div className="space-y-4">
+      <div className="panel p-5">
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <div className="text-[10px] mono text-s-accent tracking-widest uppercase">SEART · Generative Red-Team</div>
+            <div className="font-display font-bold text-xl text-gradient mt-1">Generation #{status.generation}</div>
+            <div className="text-[10px] mono text-gray-500 mt-1">
+              {status.popSize} live genomes · {status.totalFired} fired · {status.totalSlipped} slipped past defenses
+            </div>
+          </div>
+          {canControl && (
+            <div className="flex gap-2">
+              <button
+                disabled={busy}
+                onClick={() => onPause(!status.paused)}
+                className={`text-[10px] mono px-3 py-1.5 rounded-sm border uppercase tracking-wider transition-all flex items-center gap-2 disabled:opacity-50 ${status.paused ? 'border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10' : 'border-amber-500/40 text-amber-400 hover:bg-amber-500/10'}`}>
+                <i className={`fas ${status.paused ? 'fa-play' : 'fa-pause'} text-[10px]`} />
+                {status.paused ? 'Resume_AI' : 'Pause_AI'}
+              </button>
+              <button
+                disabled={busy}
+                onClick={onFire}
+                className="text-[10px] mono px-3 py-1.5 rounded-sm border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 uppercase tracking-wider transition-all flex items-center gap-2 disabled:opacity-50">
+                <i className="fas fa-bolt text-[10px]" />
+                Fire_Genome
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Fitness curve */}
+        <div className="text-[9px] mono text-gray-500 uppercase tracking-widest mb-2">Adversarial fitness · last {status.history?.length || 0} generations</div>
+        <div className="bg-s-void rounded-lg p-3 border border-s-border" style={{ height: 100 }}>
+          <svg viewBox="0 0 240 80" className="w-full h-full">
+            {(status.history || []).map((h, i, arr) => {
+              const x = (i / Math.max(1, arr.length - 1)) * 240;
+              const y = 80 - (h.bestFitness / histMax) * 70 - 5;
+              const next = arr[i + 1];
+              if (!next) return null;
+              const x2 = ((i + 1) / Math.max(1, arr.length - 1)) * 240;
+              const y2 = 80 - (next.bestFitness / histMax) * 70 - 5;
+              return <line key={i} x1={x} y1={y} x2={x2} y2={y2} stroke="#ef4444" strokeWidth="1.5" />;
+            })}
+            {(status.history || []).map((h, i, arr) => {
+              const x = (i / Math.max(1, arr.length - 1)) * 240;
+              const y = 80 - (h.meanFitness / histMax) * 70 - 5;
+              return <circle key={`m-${i}`} cx={x} cy={y} r="1.5" fill="#d97706" />;
+            })}
+          </svg>
+        </div>
+        <div className="flex gap-4 text-[9px] mono text-gray-500 mt-2">
+          <span><span className="inline-block w-3 h-0.5 bg-rose-500 mr-1 align-middle" />best fitness</span>
+          <span><span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-600 mr-1 align-middle" />mean fitness</span>
+        </div>
+      </div>
+
+      {/* Population grid */}
+      <div className="panel p-5">
+        <div className="text-[10px] mono text-s-accent tracking-widest uppercase mb-4">Live population · {status.population?.length || 0} genomes in flight</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          {(status.population || []).map(g => (
+            <motion.div
+              key={g.id}
+              layout
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="rounded-lg p-3 border bg-s-void"
+              style={{ borderColor: FAMILY_COLOR[g.family] || '#27272a' }}>
+              <div className="flex items-start justify-between mb-2">
+                <div>
+                  <div className="text-[10px] mono uppercase tracking-wider" style={{ color: FAMILY_COLOR[g.family] || '#a1a1aa' }}>{g.family}</div>
+                  <div className="text-[9px] mono text-gray-600">gen-{g.gen} · #{g.id}{g.parents?.length ? ` ← ${g.parents.join(',')}` : ''}</div>
+                </div>
+                <span className={`badge badge-${g.severity}`}>{g.severity}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1 text-[9px] mono text-gray-500">
+                <div>band: <span className="text-gray-300">{g.freq_band}</span></div>
+                <div>prop: <span className="text-gray-300">{g.propagation}</span></div>
+                <div>evade: <span className="text-gray-300">{g.evasion}</span></div>
+                <div>decoys: <span className="text-gray-300">{g.decoys}</span></div>
+                <div>H: <span className="text-gray-300">{g.entropy}</span></div>
+                <div>dBm: <span className="text-gray-300">{g.power_dbm}</span></div>
+              </div>
+              {g.target && (
+                <div className="text-[9px] mono text-gray-500 mt-2 pt-2 border-t border-s-border/40">
+                  → <span className="text-rose-400">{g.target.callsign || g.target.icao24}</span>
+                  {g.fitness > 0 && <span className="ml-2">fitness: <span className="text-amber-400">{g.fitness}</span></span>}
+                </div>
+              )}
+            </motion.div>
+          ))}
+        </div>
+      </div>
+
+      {status.fittest && (
+        <div className="panel p-4 border" style={{ borderColor: '#7f1d1d' }}>
+          <div className="text-[9px] mono text-rose-400 tracking-widest uppercase mb-1">Apex predator · gen {status.fittest.gen}</div>
+          <div className="text-xs text-gray-200">{status.fittest.description || `${status.fittest.family} via ${status.fittest.freq_band}`}</div>
+          <div className="text-[10px] mono text-gray-500 mt-1">fitness {status.fittest.fitness} · evasion {status.fittest.evasion}</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ========== 8c. DEFENSE CONSOLE ==========
+// Live feed of every mitigation the auto-defender just executed. Runs on the
+// dashboard so the operator (and the investor) can read off the outcome of
+// every attack: which playbook fired, which target was blocked, and how
+// confident the defender was.
+const DefenseConsole = ({ stats, log }) => {
+  const totals = stats?.totals || {};
+  const recent = log?.length ? log : (stats?.recent || []);
+  return (
+    <div className="panel p-5 mb-4">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <div className="text-[10px] mono text-emerald-400 tracking-widest uppercase">Defense Console · auto-mitigation</div>
+          <div className="font-display font-bold text-lg text-gradient mt-0.5">Active blue-team telemetry</div>
+        </div>
+        <div className="grid grid-cols-3 gap-3 text-center">
+          <div className="px-3 py-1.5 rounded-sm bg-emerald-500/5 border border-emerald-500/30">
+            <div className="text-[9px] mono text-emerald-400 uppercase tracking-widest">Blocked</div>
+            <div className="text-lg font-display font-bold text-emerald-300">{totals.mitigated || 0}</div>
+          </div>
+          <div className="px-3 py-1.5 rounded-sm bg-rose-500/5 border border-rose-500/30">
+            <div className="text-[9px] mono text-rose-400 uppercase tracking-widest">IPs cut</div>
+            <div className="text-lg font-display font-bold text-rose-300">{totals.blockedIps || 0}</div>
+          </div>
+          <div className="px-3 py-1.5 rounded-sm bg-amber-500/5 border border-amber-500/30">
+            <div className="text-[9px] mono text-amber-400 uppercase tracking-widest">Quarantined</div>
+            <div className="text-lg font-display font-bold text-amber-300">{totals.quarantined || 0}</div>
+          </div>
+        </div>
+      </div>
+      {recent.length === 0 ? (
+        <div className="text-[11px] mono text-gray-600 text-center py-4">no attacks yet — fire one to watch the defender respond</div>
+      ) : (
+        <div className="space-y-1 max-h-56 overflow-y-auto">
+          {recent.slice(0, 12).map((e, i) => (
+            <motion.div key={`${e.threatId || e.ts}-${i}`}
+              layout
+              initial={{ opacity: 0, x: -12 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="flex items-center gap-3 text-[11px] mono px-2 py-1 rounded bg-emerald-500/3 border-l-2 border-emerald-500/50">
+              <i className="fas fa-shield-halved text-emerald-400 text-[10px]" />
+              <span className="text-emerald-300 font-bold tracking-wider">BLOCKED</span>
+              <span className="text-gray-300">{e.threat_type}</span>
+              <span className="text-gray-500">·</span>
+              <span className="text-emerald-400">{e.action}</span>
+              {e.target && (
+                <>
+                  <span className="text-gray-500">·</span>
+                  <span className="text-gray-400">{e.target.kind}: <span className="text-gray-200">{String(e.target.value).slice(0, 32)}</span></span>
+                </>
+              )}
+              <span className="ml-auto text-gray-600 text-[10px]">{new Date(e.ts).toLocaleTimeString()}</span>
+            </motion.div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ========== 9. ALERTS PAGE ==========
 const AlertsPage = ({ alerts, onAck }) => (
   <div className="panel p-5">
@@ -771,7 +967,7 @@ const FlightControlPanel = ({ flight, airports, onClose, onPause, onReroute, onA
   );
 };
 
-const LiveMap = ({ assets }) => {
+const LiveMap = ({ assets, forecast }) => {
   const [airports, setAirports] = useState({});
   const [flights, setFlights]   = useState([]);
   const [selected, setSelected] = useState(null);
@@ -856,6 +1052,49 @@ const LiveMap = ({ assets }) => {
             radius={18} pathOptions={{ color: '#b91c1c', fillColor: '#b91c1c', fillOpacity: 0.2, weight: 1 }} />
         ))}
 
+        {/* Pre-Crime: 60s ghost-trail projections per aircraft */}
+        {forecast?.assets?.map(fa => fa.forecast && (
+          <React.Fragment key={`fc-${fa.asset_id}`}>
+            <Polyline positions={[[fa.lat, fa.lon], [fa.forecast.lat, fa.forecast.lon]]}
+                      pathOptions={{ color: '#22d3ee', weight: 1.5, opacity: 0.6, dashArray: '2 4' }} />
+            <CircleMarker center={[fa.forecast.lat, fa.forecast.lon]}
+                          radius={4} pathOptions={{ color: '#22d3ee', fillColor: '#22d3ee', fillOpacity: 0.4, weight: 1 }}>
+              <Popup>
+                <div style={{ background: '#161618', border: '1px solid #22d3ee44', borderRadius: 8, padding: '6px 10px', color: '#fff' }}>
+                  <div style={{ fontFamily: 'Share Tech Mono', fontSize: 10, color: '#22d3ee' }}>T+{forecast.horizon_s}s projection</div>
+                  <div style={{ fontFamily: 'Share Tech Mono', fontSize: 11, color: '#a1a1aa' }}>{fa.callsign || fa.icao24}</div>
+                </div>
+              </Popup>
+            </CircleMarker>
+          </React.Fragment>
+        ))}
+
+        {/* Pre-Crime: hotspot heatmap cells */}
+        {forecast?.cells?.filter(c => c.intensity > 0.15).map((c, i) => (
+          <CircleMarker key={`heat-${i}`} center={[c.lat, c.lon]}
+            radius={Math.max(6, c.intensity * 28)}
+            pathOptions={{
+              color: c.intensity > 0.6 ? '#dc2626' : '#f59e0b',
+              fillColor: c.intensity > 0.6 ? '#dc2626' : '#f59e0b',
+              fillOpacity: 0.08 + c.intensity * 0.18,
+              weight: 0,
+            }} />
+        ))}
+
+        {/* Pre-Crime: pulsing red ring on hot-zone hits (plane projected into high-intensity cell) */}
+        {forecast?.hotZones?.map((h, i) => (
+          <CircleMarker key={`hz-${i}`} center={[h.forecast.lat, h.forecast.lon]}
+            radius={22} pathOptions={{ color: '#dc2626', fillColor: '#dc2626', fillOpacity: 0.0, weight: 2, dashArray: '4 4' }}>
+            <Popup>
+              <div style={{ background: '#161618', border: '1px solid #dc2626', borderRadius: 8, padding: '6px 10px', color: '#fff' }}>
+                <div style={{ fontFamily: 'Share Tech Mono', fontSize: 10, color: '#dc2626' }}>PRE-CRIME · projected breach</div>
+                <div style={{ fontFamily: 'Share Tech Mono', fontSize: 11, color: '#a1a1aa' }}>{h.callsign || h.icao24}</div>
+                <div style={{ fontFamily: 'Share Tech Mono', fontSize: 10, color: '#a1a1aa' }}>likely type: {h.dominantType || 'unknown'}</div>
+              </div>
+            </Popup>
+          </CircleMarker>
+        ))}
+
         {/* Planes */}
         {ac.map(a => (
           <Marker key={a.id}
@@ -888,10 +1127,11 @@ const LiveMap = ({ assets }) => {
 // built once on mount and torn down on unmount. Aircraft markers are synced
 // from `assets` in a second effect so every 2-second position tick doesn't
 // rebuild the whole GL context (which was leaking + freezing the tab).
-const Globe3D = ({ assets }) => {
+const Globe3D = ({ assets, forecast }) => {
   const containerRef = useRef();
   const sceneRef = useRef(null);          // { scene, camera, renderer, controls, clouds }
   const markersRef = useRef(new Map());   // asset_id -> THREE.Group
+  const forecastGroupRef = useRef(null);  // single THREE.Group holding all forecast viz
   const [error] = useState(false);
 
   const latLonToVector3 = (lat, lon, radius = 5.05) => {
@@ -1035,6 +1275,11 @@ const Globe3D = ({ assets }) => {
 
     sceneRef.current = { scene, camera, renderer, controls };
 
+    // Persistent group for Pre-Crime visualization (ghost trails, heat dots, hot-zone rings)
+    const forecastGroup = new THREE.Group();
+    scene.add(forecastGroup);
+    forecastGroupRef.current = forecastGroup;
+
     return () => {
       cancelAnimationFrame(rafId);
       window.removeEventListener('resize', onResize);
@@ -1044,9 +1289,64 @@ const Globe3D = ({ assets }) => {
         container.removeChild(renderer.domElement);
       }
       markersRef.current.clear();
+      forecastGroupRef.current = null;
       sceneRef.current = null;
     };
   }, []);
+
+  // Sync forecast overlay (ghost trails + heatmap dots + hot-zone rings) on the globe.
+  useEffect(() => {
+    const fg = forecastGroupRef.current;
+    if (!fg) return;
+    while (fg.children.length) {
+      const c = fg.children[0];
+      fg.remove(c);
+      if (c.geometry) c.geometry.dispose();
+      if (c.material) c.material.dispose();
+    }
+    if (!forecast) return;
+
+    // Ghost trails: dashed line from current → projected position 60s out
+    (forecast.assets || []).forEach(fa => {
+      if (!fa.forecast) return;
+      const a = latLonToVector3(fa.lat, fa.lon, 5.06);
+      const b = latLonToVector3(fa.forecast.lat, fa.forecast.lon, 5.10);
+      const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
+      const mat = new THREE.LineDashedMaterial({ color: 0x22d3ee, dashSize: 0.05, gapSize: 0.05, transparent: true, opacity: 0.65 });
+      const line = new THREE.Line(geo, mat);
+      line.computeLineDistances();
+      fg.add(line);
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.04, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.85 }),
+      );
+      dot.position.copy(b);
+      fg.add(dot);
+    });
+
+    // Heatmap dots — small additive-blended pucks above the hot grid cells
+    (forecast.cells || []).filter(c => c.intensity > 0.2).forEach(c => {
+      const v = latLonToVector3(c.lat, c.lon, 5.04);
+      const color = c.intensity > 0.6 ? 0xdc2626 : 0xf59e0b;
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18 + c.intensity * 0.4, blending: THREE.AdditiveBlending });
+      const r = 0.05 + c.intensity * 0.18;
+      const m = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 12), mat);
+      m.position.copy(v);
+      fg.add(m);
+    });
+
+    // Hot-zone rings: pulsing red ring around projected breach points
+    (forecast.hotZones || []).forEach(h => {
+      const v = latLonToVector3(h.forecast.lat, h.forecast.lon, 5.12);
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.18, 0.22, 32),
+        new THREE.MeshBasicMaterial({ color: 0xdc2626, transparent: true, opacity: 0.85, side: THREE.DoubleSide }),
+      );
+      ring.position.copy(v);
+      ring.lookAt(v.clone().multiplyScalar(2));
+      fg.add(ring);
+    });
+  }, [forecast]);
 
   // Sync markers with assets whenever the list changes.
   useEffect(() => {
@@ -1362,7 +1662,63 @@ const Main = () => {
   const [history, setHistory] = useState([]);
   const [unread, setUnread] = useState(0);
   const [bellOpen, setBellOpen] = useState(false);
+  const [defenseLog, setDefenseLog] = useState([]);
+  const [defenderStats, setDefenderStats] = useState(null);
   const resolveTimers = useRef(new Map());
+
+  // Pull initial defender stats so the panel shows totals on first paint.
+  useEffect(() => {
+    api.getDefenderStatus().then(r => setDefenderStats(r.data)).catch(() => {});
+    const t = setInterval(() => api.getDefenderStatus().then(r => setDefenderStats(r.data)).catch(() => {}), 15000);
+    return () => clearInterval(t);
+  }, []);
+
+  // ── SEART (generative red-team) state ────────────────────────────────────
+  const [seartStatus, setSeartStatus] = useState(null);
+  const [seartBusy, setSeartBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api.getRedTeamStatus().then(r => { if (alive) setSeartStatus(r.data); }).catch(() => {});
+    if (!wsOn) return () => { alive = false; };
+    const unsub = wsOn('seart:generation', (snap) => {
+      setSeartStatus(prev => ({
+        ...(prev || {}),
+        running: true,
+        generation: snap.generation,
+        popSize: snap.population?.length ?? prev?.popSize ?? 0,
+        history: snap.history,
+        population: snap.population,
+        totalFired: snap.totalFired,
+        totalSlipped: snap.totalSlipped,
+        fittest: prev?.fittest,
+      }));
+    });
+    return () => { alive = false; unsub && unsub(); };
+  }, [wsOn]);
+  const handleSeartPause = async (paused) => {
+    setSeartBusy(true);
+    try { const r = await api.pauseRedTeam(paused); setSeartStatus(r.data); }
+    finally { setSeartBusy(false); }
+  };
+  const handleSeartFire = async () => {
+    setSeartBusy(true);
+    try { await api.fireRedTeamNow(); }
+    catch (err) {
+      const msg = err?.error || 'no live targets';
+      setToasts(prev => [{ id: `seart-${Date.now()}`, state: 'info', severity: 'high', message: 'red-team fire failed', sub: msg, ts: Date.now() }, ...prev].slice(0, 6));
+    }
+    finally { setSeartBusy(false); }
+  };
+
+  // ── Pre-Crime forecast state ─────────────────────────────────────────────
+  const [forecast, setForecast] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    api.getForecast().then(r => { if (alive) setForecast(r.data); }).catch(() => {});
+    if (!wsOn) return () => { alive = false; };
+    const unsub = wsOn('forecast:tick', (snap) => { if (alive) setForecast(snap); });
+    return () => { alive = false; unsub && unsub(); };
+  }, [wsOn]);
 
   useEffect(() => {
     if (!wsOn) return;
@@ -1410,6 +1766,46 @@ const Main = () => {
       load();
     };
 
+    const onMitigated = (t) => {
+      const tid = t?.id;
+      if (tid == null) return load();
+      const id = `threat-${tid}`;
+      const mitigation = t?.mitigation || t?.raw_features?.mitigation || null;
+      const subLine = mitigation
+        ? `BLOCKED via ${mitigation.action}${mitigation.targets?.[0] ? ` · ${mitigation.targets[0].kind}: ${mitigation.targets[0].value}` : ''}`
+        : 'attack neutralized';
+      setToasts(prev => {
+        const found = prev.find(p => p.id === id);
+        if (found) {
+          return prev.map(p => p.id === id
+            ? { ...p, state: 'mitigated', sub: subLine, mitigation, ts: Date.now() }
+            : p);
+        }
+        // No matching active toast (manual injection bypass) — synthesize a blocked toast
+        return [{
+          id, threatId: tid, state: 'mitigated', severity: t.severity || 'high',
+          message: `${t.threat_type || 'threat'}${t.icao24 ? ` · ${t.icao24}` : ''}`,
+          sub: subLine, mitigation, threat: t, ts: Date.now(),
+        }, ...prev].slice(0, 6);
+      });
+      setHistory(prev => prev.map(p => p.id === id ? { ...p, state: 'mitigated', sub: subLine, mitigation, ts: Date.now() } : p));
+      // Hold the green BLOCKED state on screen ~6s so the operator clearly sees it
+      const existing = resolveTimers.current.get(id);
+      if (existing) clearTimeout(existing);
+      const handle = setTimeout(() => {
+        setToasts(prev => prev.filter(p => p.id !== id));
+        resolveTimers.current.delete(id);
+      }, 6000);
+      resolveTimers.current.set(id, handle);
+      // Push a defense-log entry for the dashboard card
+      setDefenseLog(prev => [{
+        ts: Date.now(), threatId: tid, threat_type: t.threat_type,
+        severity: t.severity, action: mitigation?.action, technique: mitigation?.technique,
+        target: mitigation?.targets?.[0],
+      }, ...prev].slice(0, 30));
+      load();
+    };
+
     const onAlert = (a) => {
       const id = `alert-${a?.id || Date.now()}`;
       const entry = {
@@ -1433,10 +1829,11 @@ const Main = () => {
         : p));
     });
     const unsubRes = wsOn('threat:resolved', onResolved);
+    const unsubMit = wsOn('threat:mitigated', onMitigated);
     const unsubAlert = wsOn('new_alert', onAlert);
 
     return () => {
-      unsubNew(); unsubUpd(); unsubRes(); unsubAlert();
+      unsubNew(); unsubUpd(); unsubRes(); unsubMit(); unsubAlert();
       resolveTimers.current.forEach(h => clearTimeout(h));
       resolveTimers.current.clear();
     };
@@ -1522,10 +1919,11 @@ const Main = () => {
         <CriticalBanner assets={displayAssets} onJumpToMap={() => setPage('map')} />
         <AnimatePresence mode="wait">
           <motion.div key={page} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: .2 }}>
-            {page === 'dashboard' && <><Dashboard data={dashData} /><ForecastChart timeline={dashData?.timeline} /></>}
-            {page === 'map' && (<div><div className="flex justify-end mb-2 gap-2"><button onClick={() => setShow3D(false)} className={`text-[10px] mono px-3 py-1 rounded-sm border ${!show3D ? 'border-[#d97706] text-[#d97706] bg-[#d9770610]' : 'border-[#27272a] text-[#52525b] hover:text-[#a1a1aa]'}`}>[ 2D_RADAR ]</button><button onClick={() => setShow3D(true)} className={`text-[10px] mono px-3 py-1 rounded-sm border ${show3D ? 'border-[#d97706] text-[#d97706] bg-[#d9770610]' : 'border-[#27272a] text-[#52525b] hover:text-[#a1a1aa]'}`}>[ 3D_GLOBE ]</button></div>{show3D ? <Globe3D assets={displayAssets} /> : <LiveMap assets={displayAssets} />}</div>)}
+            {page === 'dashboard' && <><DefenseConsole stats={defenderStats} log={defenseLog} /><Dashboard data={dashData} /><ForecastChart timeline={dashData?.timeline} /></>}
+            {page === 'map' && (<div><div className="flex justify-end mb-2 gap-2"><button onClick={() => setShow3D(false)} className={`text-[10px] mono px-3 py-1 rounded-sm border ${!show3D ? 'border-[#d97706] text-[#d97706] bg-[#d9770610]' : 'border-[#27272a] text-[#52525b] hover:text-[#a1a1aa]'}`}>[ 2D_RADAR ]</button><button onClick={() => setShow3D(true)} className={`text-[10px] mono px-3 py-1 rounded-sm border ${show3D ? 'border-[#d97706] text-[#d97706] bg-[#d9770610]' : 'border-[#27272a] text-[#52525b] hover:text-[#a1a1aa]'}`}>[ 3D_GLOBE ]</button></div>{show3D ? <Globe3D assets={displayAssets} forecast={forecast} /> : <LiveMap assets={displayAssets} forecast={forecast} />}</div>)}
             {page === 'assets' && <AssetsPage assets={displayAssets} user={user} selectedAsset={selectedAsset} onClearSelected={handleClearSelected} onIsolate={(asset, isolating) => handleIsolateAsset(asset, isolating)} />}
             {page === 'threats' && <ThreatsPage threats={threats} onUpdateStatus={async (id, status) => { await api.updateThreat(id, { status }); load(); }} />}
+            {page === 'redteam' && <SeartPage user={user} status={seartStatus} onPause={handleSeartPause} onFire={handleSeartFire} busy={seartBusy} />}
             {page === 'alerts' && <AlertsPage alerts={alerts} onAck={async (id) => { await api.ackAlert(id); load(); }} />}
             {page === 'reports' && <ReportsPage reports={reports} />}
             {page === 'audit' && <AuditPage auditLog={dashData?.auditLog} />}

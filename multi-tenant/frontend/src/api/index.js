@@ -53,3 +53,14 @@ export const getFlight         = (id)                => api.get(`/simulator/flig
 export const pauseFlight       = (id, paused)        => api.post(`/simulator/flights/${id}/pause`, { paused });
 export const rerouteFlight     = (id, from, to)      => api.post(`/simulator/flights/${id}/route`, { from, to });
 export const injectAttack      = (id, opts = {})     => api.post(`/simulator/flights/${id}/attack`, opts);
+
+// ── SEART generative red-team ────────────────────────────────────────────────
+export const getRedTeamStatus  = ()                  => api.get('/redteam/status');
+export const pauseRedTeam      = (paused = true)     => api.post('/redteam/pause', { paused });
+export const fireRedTeamNow    = ()                  => api.post('/redteam/fire-now');
+
+// ── Pre-Crime forecaster ─────────────────────────────────────────────────────
+export const getForecast       = ()                  => api.get('/forecast');
+
+// ── Auto-defender ────────────────────────────────────────────────────────────
+export const getDefenderStatus = ()                  => api.get('/defender/status');

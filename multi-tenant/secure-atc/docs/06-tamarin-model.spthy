@@ -1,0 +1,166 @@
+/*
+ * SHADOW-COMM v1 — Tamarin protocol model (frontier upgrade #20).
+ *
+ * This file is consumed by the Tamarin prover (https://tamarin-prover.com).
+ * It encodes the symbolic semantics of the SHADOW-COMM v1 message flow
+ * and the security lemmas that must be discharged before the protocol
+ * is considered formally verified.
+ *
+ * Abstractions:
+ *   - PQ KEM (ML-KEM-1024)              -> kem_kg, kem_encap, kem_decap
+ *   - PQ signatures (ML-DSA-87 + XMSS)  -> sig_kg, sign, verify (any-of-three model)
+ *   - HKDF-SHA3-512                     -> kdf
+ *   - HMAC-SHA3-256                     -> hmac
+ *   - AEAD (AES-256-GCM)                -> aead_seal, aead_open
+ *
+ * Build:    tamarin-prover --prove docs/06-tamarin-model.spthy
+ * Lemmas:   the bottom of this file lists what must hold.
+ */
+
+theory ShadowCommV1
+begin
+
+builtins: hashing, symmetric-encryption, asymmetric-encryption, signing
+
+/* ---------- abstract primitives -------------------------------------- */
+
+functions: kem_kg/1, kem_encap/2, kem_decap/2 [destructor],
+           kdf/3,
+           hmac/2,
+           knock_token/4
+
+equations:
+    kem_decap(esk, kem_encap(epk, m)) = m
+
+/* ---------- aircraft enrolment --------------------------------------- */
+
+rule Enrol_Aircraft:
+    [ Fr(~k_master), Fr(~sk_a) ]
+  -->
+    [ !Aircraft($A, ~k_master, ~sk_a, pk(~sk_a)),
+      !PinnedAircraftKey($A, pk(~sk_a)) ]
+
+rule Enrol_Ground:
+    [ Fr(~sk_g) ]
+  -->
+    [ !Ground($G, ~sk_g, pk(~sk_g)),
+      !PinnedGroundKey($G, pk(~sk_g)) ]
+
+/* ---------- Phase 1: knock ------------------------------------------- */
+
+rule Knock:
+    let bucket = $B
+        token  = knock_token(k_master, $A, $G, bucket)
+    in
+    [ !Aircraft($A, k_master, sk_a, pk_a),
+      !Ground($G, sk_g, pk_g),
+      Fr(~nonce_a) ]
+  --[ AircraftKnocks($A, $G, ~nonce_a) ]->
+    [ Out(<token, $A, ~nonce_a>),
+      St_Aircraft_PostKnock($A, $G, ~nonce_a, k_master, sk_a) ]
+
+/* ---------- Phase 2: KEM_OFFER --------------------------------------- */
+
+rule Offer:
+    let bucket = $B
+        token  = knock_token(k_master, $A, $G, bucket)
+        epk    = kem_kg(~esk)
+        signed = <'KEM_OFFER', $G, epk, ~nonce_g, nonce_a, ~ts>
+        sigma  = sign(signed, sk_g)
+    in
+    [ !Aircraft($A, k_master, sk_a, pk_a),
+      !Ground($G, sk_g, pk_g),
+      In(<token, $A, nonce_a>),
+      Fr(~esk),
+      Fr(~nonce_g),
+      Fr(~ts) ]
+  --[ GroundOffersTo($A, $G, nonce_a, ~nonce_g) ]->
+    [ Out(<'KEM_OFFER', $G, epk, ~nonce_g, nonce_a, ~ts, sigma>),
+      St_Ground_PostOffer($A, $G, ~esk, ~nonce_g, nonce_a) ]
+
+/* ---------- Phase 3: KEM_RESP ---------------------------------------- */
+
+rule Resp:
+    let signed_offer = <'KEM_OFFER', $G, epk, nonce_g, nonce_a, ts>
+        ct           = kem_encap(epk, ~ss)
+        signed_resp  = <'KEM_RESP', $A, ct, nonce_a, nonce_g, ts2>
+        sigma_a      = sign(signed_resp, sk_a)
+        salt         = h(<nonce_a, nonce_g>)
+        k_ag         = kdf(salt, ~ss, <'A->G/key', $A, $G>)
+        k_ga         = kdf(salt, ~ss, <'G->A/key', $A, $G>)
+    in
+    [ St_Aircraft_PostKnock($A, $G, nonce_a, k_master, sk_a),
+      !PinnedGroundKey($G, pk_g),
+      In(<'KEM_OFFER', $G, epk, nonce_g, nonce_a, ts, sigma_g>),
+      Fr(~ss),
+      Fr(~ts2) ]
+  --[ Eq(verify(sigma_g, signed_offer, pk_g), true),
+      AircraftSecures($A, $G, k_ag, k_ga) ]->
+    [ Out(<'KEM_RESP', $A, ct, nonce_a, nonce_g, ~ts2, sigma_a>),
+      St_Aircraft_Established($A, $G, k_ag, k_ga) ]
+
+rule GroundEstablishes:
+    let signed_resp = <'KEM_RESP', $A, ct, nonce_a, nonce_g, ts2>
+        ss          = kem_decap(esk, ct)
+        salt        = h(<nonce_a, nonce_g>)
+        k_ag        = kdf(salt, ss, <'A->G/key', $A, $G>)
+        k_ga        = kdf(salt, ss, <'G->A/key', $A, $G>)
+    in
+    [ St_Ground_PostOffer($A, $G, esk, nonce_g, nonce_a),
+      !PinnedAircraftKey($A, pk_a),
+      In(<'KEM_RESP', $A, ct, nonce_a, nonce_g, ts2, sigma_a>) ]
+  --[ Eq(verify(sigma_a, signed_resp, pk_a), true),
+      GroundSecures($A, $G, k_ag, k_ga) ]->
+    [ St_Ground_Established($A, $G, k_ag, k_ga) ]
+
+/* ---------- adversary capabilities ----------------------------------- */
+
+rule RevealLongTermAircraft:
+    [ !Aircraft($A, k_master, sk_a, pk_a) ]
+  --[ RevealedA($A) ]->
+    [ Out(<k_master, sk_a>) ]
+
+rule RevealLongTermGround:
+    [ !Ground($G, sk_g, pk_g) ]
+  --[ RevealedG($G) ]->
+    [ Out(sk_g) ]
+
+/* ---------- restrictions --------------------------------------------- */
+
+restriction Eq:
+    "All x y #i. Eq(x, y) @ #i ==> x = y"
+
+/* ---------- security lemmas ------------------------------------------ */
+
+lemma executable:
+    exists-trace
+    "Ex A G ag ga #i.
+        AircraftSecures(A, G, ag, ga) @ #i"
+
+lemma secrecy_K_AG:
+    "All A G k_ag k_ga #i.
+        GroundSecures(A, G, k_ag, k_ga) @ #i
+        & not (Ex #r. RevealedA(A) @ #r & #r < #i)
+        & not (Ex #r. RevealedG(G) @ #r & #r < #i)
+        ==> not (Ex #j. K(k_ag) @ #j)"
+
+lemma secrecy_K_GA:
+    "All A G k_ag k_ga #i.
+        GroundSecures(A, G, k_ag, k_ga) @ #i
+        & not (Ex #r. RevealedA(A) @ #r & #r < #i)
+        & not (Ex #r. RevealedG(G) @ #r & #r < #i)
+        ==> not (Ex #j. K(k_ga) @ #j)"
+
+lemma forward_secrecy:
+    "All A G k_ag k_ga #i #r.
+        GroundSecures(A, G, k_ag, k_ga) @ #i
+        & RevealedG(G) @ #r
+        & #i < #r
+        ==> not (Ex #j. K(k_ag) @ #j & #i < #j & #j < #r)"
+
+lemma injective_agreement_aircraft_to_ground:
+    "All A G k_ag k_ga #i.
+        GroundSecures(A, G, k_ag, k_ga) @ #i
+        ==> ( Ex #j. AircraftSecures(A, G, k_ag, k_ga) @ #j & #j < #i )"
+
+end

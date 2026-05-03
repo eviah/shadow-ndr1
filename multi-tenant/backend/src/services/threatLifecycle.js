@@ -15,6 +15,7 @@
  */
 import { db } from './database.js';
 import { logger } from '../utils/logger.js';
+import { mitigate as defenderMitigate } from './autoDefender.js';
 
 const ACTIVE_TTL_MS     = Number(process.env.THREAT_ACTIVE_TTL_MS   || 90_000);
 const SWEEP_INTERVAL_MS = Number(process.env.THREAT_SWEEP_INTERVAL_MS || 15_000);
@@ -87,7 +88,11 @@ export async function upsertActiveThreat(tenantId, {
             mitre_technique ?? null,
         ],
     );
-    await syncAssetThreatLevel(tenantId, asset_id, icao24);
+    await syncAssetThreatLevel(tenantId, asset_id, icao24, io);
+    // Fire-and-forget the auto-defender. It applies a mitigation and flips
+    // status to 'resolved' after a short visible delay so operators see the
+    // attack stopped on screen instead of just timing out via the sweeper.
+    defenderMitigate(tenantId, inserted.rows[0], io);
     return { threat: inserted.rows[0], created: true };
 }
 

@@ -1,0 +1,46 @@
+[package]
+name = "shadow-atc-ground"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "SHADOW-ATC ground-station reference implementation (SHADOW-COMM v1)"
+
+[lib]
+name = "shadow_atc_ground"
+path = "src/lib.rs"
+
+[[bin]]
+name = "shadow-atc-ground"
+path = "src/main.rs"
+
+[dependencies]
+# AEAD / hashing / KDF — pure Rust, vetted (RustCrypto)
+aes-gcm    = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
+sha3       = { version = "0.10", default-features = false }
+hkdf       = { version = "0.12", default-features = false }
+hmac       = { version = "0.12", default-features = false }
+digest     = { version = "0.10", default-features = false, features = ["mac"] }
+
+# Post-quantum primitives — pure Rust (RustCrypto). Default features pull
+# in `rand_core` and `signature` which we need for keygen and Signer/Verifier.
+ml-kem     = { version = "0.2" }
+ml-dsa     = { version = "0.0.4" }
+signature  = { version = "2", default-features = false }
+hybrid-array = { version = "0.2", default-features = false }
+kem        = { version = "=0.3.0-pre.0", default-features = false }
+
+# Random + side-channel hygiene
+rand       = { version = "0.8",  default-features = false, features = ["std", "std_rng"] }
+rand_core  = { version = "0.6" }
+subtle     = { version = "2", default-features = false }
+zeroize    = { version = "1",   default-features = false }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+overflow-checks = true
+debug = false
+
+[profile.dev]
+overflow-checks = true

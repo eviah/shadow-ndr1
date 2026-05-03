@@ -26,6 +26,8 @@ import { redisService } from './services/redis.js';
 import ThreatScoring from './services/threatScoring.js';
 import { upsertActiveThreat, startSweeper } from './services/threatLifecycle.js';
 import * as simulator from './services/simulator.js';
+import * as seart from './services/seartRedTeam.js';
+import * as forecaster from './services/preCrimeForecaster.js';
 import { startLiveStream } from './services/livestream.js';
 
 // Route imports
@@ -37,6 +39,9 @@ import alertsRoutes from './routes/alerts.js';
 import reportsRoutes from './routes/reports.js';
 import healthRoutes from './routes/health.js';
 import simulatorRoutes from './routes/simulator.js';
+import redteamRoutes from './routes/redteam.js';
+import forecastRoutes from './routes/forecast.js';
+import defenderRoutes from './routes/defender.js';
 import webauthnRoutes from './routes/webauthn.js';
 import { requireStepUp } from './services/webauthn.js';
 
@@ -166,6 +171,9 @@ app.use('/api/threats',    apiRateLimiter, threatsRoutes);
 app.use('/api/alerts',     apiRateLimiter, alertsRoutes);
 app.use('/api/reports',    apiRateLimiter, reportsRoutes);
 app.use('/api/simulator',  apiRateLimiter, simulatorRoutes);
+app.use('/api/redteam',    apiRateLimiter, redteamRoutes);
+app.use('/api/forecast',   apiRateLimiter, forecastRoutes);
+app.use('/api/defender',   apiRateLimiter, defenderRoutes);
 app.use('/api/webauthn',   apiRateLimiter, webauthnRoutes);
 app.use('/health', healthRoutes);
 
@@ -501,6 +509,8 @@ process.on('unhandledRejection', (err) => {
     });
     startSweeper(io);
     await simulator.start(io);
+    forecaster.start(io);
+    seart.start(io);
     logger.info(
       { port: config.PORT, env: config.NODE_ENV, ws: true, sensor: true },
       '🚀 Shadow NDR MT APEX v3.1 LIVE – Sensor endpoint ready'
